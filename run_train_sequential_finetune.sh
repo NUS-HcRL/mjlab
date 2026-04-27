@@ -16,7 +16,7 @@ CONFIG="Mjlab-Tracking-Flat-PM1"
 # COMMON_ARGS="--env.scene.num-envs 4096 --agent.max_iterations 10000 --protector-map-front ${PROTECTOR_MAP_FRONT} --protector-map-back ${PROTECTOR_MAP_BACK}"
 
 # 不用护具 map 时：注释掉上面 PROTECTOR_MAP_* 与 COMMON_ARGS 一行，改用下面这行（reduce_contact_force 用原始接触力）：
-COMMON_ARGS="--env.scene.num-envs 4096 --agent.max_iterations 5000 --use-protector-map False"
+COMMON_ARGS="--env.scene.num-envs 4096 --agent.max_iterations 10000 --use-protector-map False"
 # 仍走 map 逻辑但厚度为 0 时，可改用：yz_map_front_zero.tsv / yz_map_back_zero.tsv 作为 PROTECTOR_MAP_*。
 
 # 8 个方向对应的 wandb run path（必须与 MOTIONS 顺序一致）

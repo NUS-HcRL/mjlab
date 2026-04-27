@@ -113,6 +113,10 @@ python -m mjlab.scripts.train Mjlab-Tracking-Flat-PM1 \
   --agent.load-run "2025-12-14_17-37-01" \
   --agent.load-checkpoint "model_1000.pt"
 
+```bash
+./run_train_sequential_finetune.sh
+```
+
 # 演示
 ## play 时护具 map（与 train 参数一致）
 默认使用 map；指定前后 TSV 名（相对 `protector_map/`）；无护具加 `--use-protector-map False`。
