@@ -35,6 +35,10 @@ class _OnnxMotionPolicyExporter(_OnnxPolicyExporter):
 
     self.joint_pos = cmd.motion.joint_pos.to("cpu")
     self.joint_vel = cmd.motion.joint_vel.to("cpu")
+    # qd_mask：仅乘参考关节速度表 joint_vel，不乘 joint_pos
+    if cmd.cfg.qd_mask is not None:
+      mask = torch.tensor(cmd.cfg.qd_mask, dtype=torch.float32).view(1, -1)
+      self.joint_vel = self.joint_vel * mask
     self.body_pos_w = cmd.motion.body_pos_w.to("cpu")
     self.body_quat_w = cmd.motion.body_quat_w.to("cpu")
     self.body_lin_vel_w = cmd.motion.body_lin_vel_w.to("cpu")

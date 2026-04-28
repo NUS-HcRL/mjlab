@@ -4,6 +4,9 @@ from pathlib import Path
 
 from mjlab.asset_zoo.robots import (
   PM_ACTION_SCALE,
+  PM_LOWER_BODY_JOINT_NAMES,
+  PM_MAX_LOWER_BODY_TORQUE,
+  PM_QD_MASK,
   PM_ROBOT_CFG,
 )
 from mjlab.envs import ManagerBasedRlEnvCfg
@@ -16,7 +19,6 @@ from mjlab.tasks.tracking.tracking_env_cfg import make_tracking_env_cfg
 
 # 护具 map 数据目录（默认站立系下的查表文件放于此，reward 中力衰减可引用）
 PROTECTOR_MAP_DIR = Path(__file__).resolve().parent / "protector_map"
-
 
 def pm1_flat_tracking_env_cfg(
   has_state_estimation: bool = True,
@@ -121,6 +123,10 @@ def pm1_flat_tracking_env_cfg(
     "LINK_ELBOW_YAW_R",
     "LINK_HEAD_YAW",
   )
+  motion_cmd.qd_mask = PM_QD_MASK
+  # 与 rl_dance_runner 一致：sum(|tau_0:12|) 超限时等比缩小（见 ManagerBasedRlEnv）
+  cfg.max_lower_body_torque = PM_MAX_LOWER_BODY_TORQUE
+  cfg.lower_body_joint_names = PM_LOWER_BODY_JOINT_NAMES
 
   ##
   # 域随机化事件

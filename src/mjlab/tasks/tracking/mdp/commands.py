@@ -94,6 +94,19 @@ class MotionCommand(CommandTerm):
     self.motion = MotionLoader(
       motion_file, self.body_indexes, device=self.device
     )
+
+    self._qd_mask: torch.Tensor | None = None
+    if cfg.qd_mask is not None:
+      nj = self.motion.joint_pos.shape[1]
+      if len(cfg.qd_mask) != nj:
+        raise ValueError(
+          f"qd_mask length ({len(cfg.qd_mask)}) must equal num joints ({nj}) "
+          "from motion file joint_pos."
+        )
+      self._qd_mask = torch.tensor(
+        list(cfg.qd_mask), dtype=torch.float32, device=self.device
+      ).view(1, -1)
+
     self.time_steps = torch.zeros(self.num_envs, dtype=torch.long, device=self.device)
     self.body_pos_relative_w = torch.zeros(
       self.num_envs, len(cfg.body_names), 3, device=self.device
@@ -176,6 +189,13 @@ class MotionCommand(CommandTerm):
   @property
   def joint_vel(self) -> torch.Tensor:
     return self.motion.joint_vel[self.time_steps]
+
+  def apply_qd_mask_to_vel(self, joint_vel: torch.Tensor) -> torch.Tensor:
+    """乘参考关节速度 ``qd``（即 ``joint_vel``）。不作用于关节位置 ``q`` / ``joint_pos``。"""
+    if self._qd_mask is None:
+      return joint_vel
+    # joint_vel: (..., num_joints); _qd_mask: (1, num_joints)
+    return joint_vel * self._qd_mask
 
   @property
   def body_pos_w(self) -> torch.Tensor:
@@ -581,6 +601,9 @@ class MotionCommandCfg(CommandTermCfg):
   body_names: tuple[str, ...]
   asset_name: str
   class_type: type[CommandTerm] = MotionCommand
+  qd_mask: tuple[float, ...] | None = None
+  """Per-joint multiplier on reference **joint velocity** only (notation ``qd`` / ``qdot``).
+  Does **not** multiply ``joint_pos`` (``q``). Length equals num joints; ``None`` means all ones."""
   pose_range: dict[str, tuple[float, float]] = field(default_factory=dict)
   velocity_range: dict[str, tuple[float, float]] = field(default_factory=dict)
   joint_position_range: tuple[float, float] = (-0.52, 0.52)

@@ -334,6 +334,8 @@ def generated_commands_with_scale(
 ) -> torch.Tensor:
   """返回当前帧的关节位置和速度目标，分别应用scale。
 
+  ``qd_mask``（若配置）仅乘在速度半段 ``joint_vel`` 上，不乘 ``joint_pos``。
+
   Args:
     env: 环境实例
     command_name: 命令名称
@@ -345,7 +347,7 @@ def generated_commands_with_scale(
   """
   command = cast(MotionCommand, env.command_manager.get_term(command_name))
   joint_pos = command.joint_pos * pos_scale
-  joint_vel = command.joint_vel * vel_scale
+  joint_vel = command.apply_qd_mask_to_vel(command.joint_vel * vel_scale)
   return torch.cat([joint_pos, joint_vel], dim=1)
 
 
@@ -356,6 +358,8 @@ def future_frames_generated_commands_with_scale(
   vel_scale: float = 0.05,
 ) -> torch.Tensor:
   """返回未来9帧的关节位置和速度目标，分别应用scale，按帧顺序堆叠。
+
+  ``qd_mask``（若配置）仅乘在每帧的速度部分，不乘位置部分。
 
   Args:
     env: 环境实例
@@ -378,7 +382,9 @@ def future_frames_generated_commands_with_scale(
 
   # 获取未来9帧的关节位置和速度
   future_pos_frames = command.motion.joint_pos[future_indices] * pos_scale
-  future_vel_frames = command.motion.joint_vel[future_indices] * vel_scale
+  future_vel_frames = command.apply_qd_mask_to_vel(
+    command.motion.joint_vel[future_indices] * vel_scale
+  )
 
   # 按帧顺序堆叠
   frame_data_list = []

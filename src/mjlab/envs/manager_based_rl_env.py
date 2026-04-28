@@ -71,6 +71,12 @@ class ManagerBasedRlEnvCfg:
   commands: dict[str, CommandTermCfg] | None = None
   curriculum: dict[str, CurriculumTermCfg] | None = None
   is_finite_horizon: bool = False
+  # Optional aggregate lower-body torque cap (rl_dance_runner: L1 限幅后等比例缩小 tau).
+  # 仿真中在物理子步后据 joint_qfrc_actuator 用位置误差缩小近似，见 _apply_lower_body_torque_limit。
+  max_lower_body_torque: float | None = None
+  lower_body_torque_asset_name: str = "robot"
+  # Entity joint name suffixes (lower body), order matches deployed tau segment [0, 12).
+  lower_body_joint_names: tuple[str, ...] = ()
 
 
 class ManagerBasedRlEnv:
@@ -162,6 +168,27 @@ class ManagerBasedRlEnv:
       renderer.initialize()
       self._offline_renderer = renderer
     self.metadata["render_fps"] = 1.0 / self.step_dt  # type: ignore
+
+    # Optional: lower-body aggregate |tau| limit (see cfg.max_lower_body_torque).
+    self._max_lower_body_torque: float | None = None
+    self._lower_body_joint_eidx: torch.Tensor | None = None
+    self._lower_body_torque_asset_name: str | None = None
+    _m = self.cfg.max_lower_body_torque
+    if (
+      _m is not None
+      and _m > 0.0
+      and len(self.cfg.lower_body_joint_names) > 0
+    ):
+      aname = self.cfg.lower_body_torque_asset_name
+      robot = self.scene[aname]
+      eids, _ = robot.find_joints(
+        list(self.cfg.lower_body_joint_names), preserve_order=True
+      )
+      self._max_lower_body_torque = float(_m)
+      self._lower_body_joint_eidx = torch.tensor(
+        eids, device=device, dtype=torch.long
+      )
+      self._lower_body_torque_asset_name = aname
 
     # Load all managers.
     self.load_managers()
@@ -301,6 +328,9 @@ class ManagerBasedRlEnv:
     for _ in range(self.cfg.decimation):
       self._sim_step_counter += 1
       self.action_manager.apply_action()
+      # 必须在 write 之前：用上一子步的 joint_qfrc 缩小本步目标，与 rl_dance 对 tau 的缩放一致
+      if self._lower_body_joint_eidx is not None:
+        self._apply_lower_body_torque_limit()
       self.scene.write_data_to_sim()
       self.sim.step()
       self.scene.update(dt=self.physics_dt)
@@ -359,6 +389,31 @@ class ManagerBasedRlEnv:
     """Close the environment and free resources."""
     if self._offline_renderer is not None:
       self._offline_renderer.close()
+
+  def _apply_lower_body_torque_limit(self) -> None:
+    """Cap aggregate lower-body |tau| like rl_dance_runner.
+
+    Uses ``joint_qfrc_actuator`` already in ``data`` from the **previous** physics substep
+    (or initial ``forward`` after reset). Scales PD position error ``tgt - q`` by
+    ``limit / sum(|tau|)`` when the L1 sum exceeds the cap (same as scaling ``tau``).
+    """
+    eidx = self._lower_body_joint_eidx
+    aname = self._lower_body_torque_asset_name
+    limit = self._max_lower_body_torque
+    if eidx is None or aname is None or limit is None:
+      return
+    robot = self.scene[aname]
+    # Actuator joint torques on lower-body DOFs (hinge: same as C++ tau segment)
+    tau_lb = robot.data.joint_qfrc_actuator[:, eidx]
+    sum_abs = tau_lb.abs().sum(dim=1)
+    scale = torch.where(
+      sum_abs > limit,
+      (limit / (sum_abs + 1e-6)).to(sum_abs.dtype),
+      torch.ones_like(sum_abs),
+    )
+    q = robot.data.joint_pos[:, eidx]
+    jpt = robot.data.joint_pos_target
+    jpt[:, eidx] = q + scale.unsqueeze(1) * (jpt[:, eidx] - q)
 
   @staticmethod
   def seed(seed: int = -1) -> int:

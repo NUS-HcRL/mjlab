@@ -90,6 +90,7 @@ uv run train Mjlab-Tracking-Flat-PM1 \
 
 ```bash
 ./run_train_sequential.sh
+./run_train_sequential_finetune.sh
 # 或
 bash run_train_sequential.sh
 ```
