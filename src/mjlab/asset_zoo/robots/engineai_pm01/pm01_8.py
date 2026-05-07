@@ -216,7 +216,7 @@ PM_ACTUATOR_HEAD = BuiltinPositionActuatorCfg(
 # solref = (timeconst, dampratio)  larger timeconst => softer
 # solimp = (d0, dmax, width)  larger width => thicker compliant layer
 SOLIMP_CONTACT_SOFT_6mm = (0.9, 0.95, 0.001)  # 6 mm compliant layer
-SOLREF_CONTACT_SOFT_6mm = (0.02, 1.0)  # 软 0.2, 1.0
+SOLREF_CONTACT_SOFT_6mm = (0.2, 1.0)  # 软 0.2, 1.0
 # default solref
 SOLIMP_CONTACT_DEFAULT = (0.9, 0.95, 0.001)  # MuJoCo 默认 0.9, 0.95, 0.001
 SOLREF_CONTACT_DEFAULT = (0.02, 1.0) # MuJoCo 默认 0.02, 1.0
