@@ -52,9 +52,14 @@ def bad_body_contact_force(
   env: ManagerBasedRlEnv,
   sensor_name: str,
   body_names: tuple[str, ...],
-  force_threshold: float,
+  body_force_thresholds: dict[str, float],
+  force_threshold: float | None = None,
 ) -> torch.Tensor:
-  """Terminate when any named body contact-force norm exceeds threshold."""
+  """Terminate when any named body contact-force norm exceeds its threshold.
+
+  Each body uses ``body_force_thresholds[name]`` when present; otherwise
+  ``force_threshold`` (required as fallback when a body is missing from the dict).
+  """
   sensor: ContactSensor = env.scene[sensor_name]
   assert sensor.data.force is not None
 
@@ -69,14 +74,23 @@ def bad_body_contact_force(
       seen.add(slot.primary_name)
 
   body_to_index = {name: i for i, name in enumerate(slot_body_names)}
-  selected_indexes = [body_to_index[name] for name in body_names if name in body_to_index]
-  if not selected_indexes:
-    return torch.zeros(env.num_envs, dtype=torch.bool, device=sensor.data.force.device)
-
-  selected_force = sensor.data.force[:, selected_indexes]  # [B, K, 3]
-  selected_force_norm = torch.norm(selected_force, dim=-1)  # [B, K]
-  max_selected_force = torch.max(selected_force_norm, dim=-1)[0]  # [B]
-  return max_selected_force > force_threshold
+  terminate = torch.zeros(env.num_envs, dtype=torch.bool, device=sensor.data.force.device)
+  for name in body_names:
+    if name not in body_to_index:
+      continue
+    if name in body_force_thresholds:
+      threshold = body_force_thresholds[name]
+    elif force_threshold is not None:
+      threshold = force_threshold
+    else:
+      raise ValueError(
+        f"bad_body_contact_force: no threshold for body {name!r}; "
+        "add it to body_force_thresholds or set force_threshold."
+      )
+    idx = body_to_index[name]
+    force_norm = torch.norm(sensor.data.force[:, idx], dim=-1)
+    terminate |= force_norm > threshold
+  return terminate
 
 
 def nonfinite_state(

@@ -259,14 +259,13 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
     ),
     "reduce_contact_force": RewardTermCfg(
       func=mdp.reduce_contact_force_weighted,
-      weight=0.015, # 0.01
+      weight=0.01, # 0.01
       params={
         "sensor_name": "body_contact_force",
         "high_weight_bodies": (
           "LINK_ELBOW_END_L",
           "LINK_ELBOW_END_R",
           "LINK_HEAD_YAW",
-          "LINK_TORSO_YAW",
         ),
         "medium_weight_bodies": (
           "LINK_ELBOW_PITCH_L",
@@ -275,12 +274,13 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
           "LINK_ELBOW_YAW_R",
         ),
         "shoulder_weight_bodies": (
+          "LINK_TORSO_YAW",
           "LINK_SHOULDER_ROLL_L",
           "LINK_SHOULDER_ROLL_R",
           "LINK_SHOULDER_YAW_L",
           "LINK_SHOULDER_YAW_R",
         ),
-        "high_weight": 50.0,
+        "high_weight": 100.0,
         "shoulder_weight": 20.0,
         "medium_weight": 2.0,
         "low_weight": 0.5,
@@ -361,7 +361,7 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
         late_upper_penalty=0.2,
         early_upper_force_scale=0.0,
       ),
-      weight=1.0,
+      weight=2.0,
     ),
     # "motor_overcurrent": RewardTermCfg(
     #   func=mdp.motor_overcurrent_penalty,
@@ -400,7 +400,7 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
       params={
         "sensor_name": "body_contact_force",
         "body_names": (),  # Set per-robot.
-        "force_threshold": 1e9,  # Set per-robot.
+        "body_force_thresholds": {},  # Set per-robot.
       },
     ),
   }
