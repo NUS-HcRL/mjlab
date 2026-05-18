@@ -259,43 +259,37 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
     ),
     "reduce_contact_force": RewardTermCfg(
       func=mdp.reduce_contact_force_weighted,
-      weight=0.015, # 0.01
+      weight=0.01, # 0.01
       params={
         "sensor_name": "body_contact_force",
         "high_weight_bodies": (
           "LINK_ELBOW_END_L",
           "LINK_ELBOW_END_R",
           "LINK_HEAD_YAW",
-          "LINK_TORSO_YAW",
         ),
         "medium_weight_bodies": (
-          "LINK_ELBOW_PITCH_L",
-          "LINK_ELBOW_PITCH_R",
-          "LINK_ELBOW_YAW_L",
-          "LINK_ELBOW_YAW_R",
-        ),
-        "shoulder_weight_bodies": (
           "LINK_SHOULDER_ROLL_L",
           "LINK_SHOULDER_ROLL_R",
           "LINK_SHOULDER_YAW_L",
           "LINK_SHOULDER_YAW_R",
+          "LINK_KNEE_PITCH_L",
+          "LINK_KNEE_PITCH_R",
         ),
-        "high_weight": 50.0,
-        "shoulder_weight": 20.0,
-        "medium_weight": 2.0,
+        "high_weight": 100.0,
+        "medium_weight": 1.0,
         "low_weight": 0.5,
         "alpha": 0.3,
         "squash_scale": 0.02,
       },
     ),
-    "control_descent_speed": RewardTermCfg(
-      func=mdp.control_descent_speed,
-      weight=1,
-      params={
-        "torso_body_name": "LINK_TORSO_YAW",
-        "threshold": 0.5,
-      },
-    ),
+    # "control_descent_speed": RewardTermCfg(
+    #   func=mdp.control_descent_speed,
+    #   weight=1,
+    #   params={
+    #     "torso_body_name": "LINK_TORSO_YAW",
+    #     "threshold": 0.5,
+    #   },
+    # ),
     "impact_velocity_reward": RewardTermCfg(
       func=mdp.ImpactVelocityReward(
         sensor_name="body_contact_force",
@@ -325,64 +319,64 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
       ),
       weight=1,
     ),
-    "lower_then_upper_contact": RewardTermCfg(
-      func=mdp.LowerBodyThenUpperBodyContactReward(
-        sensor_name="body_contact_force",
-        lower_body_names=(
-          "LINK_BASE",
-          "LINK_HIP_PITCH_L",
-          "LINK_HIP_PITCH_R",
-          "LINK_HIP_ROLL_L",
-          "LINK_HIP_ROLL_R",
-          "LINK_HIP_YAW_L",
-          "LINK_HIP_YAW_R",
-          "LINK_KNEE_PITCH_L",
-          "LINK_KNEE_PITCH_R",
-        ),
-        upper_body_names=(
-          "LINK_TORSO_YAW",
-          "LINK_HEAD_YAW",
-          "LINK_SHOULDER_ROLL_L",
-          "LINK_SHOULDER_ROLL_R",
-          "LINK_SHOULDER_YAW_L",
-          "LINK_SHOULDER_YAW_R",
-          "LINK_ELBOW_PITCH_L",
-          "LINK_ELBOW_PITCH_R",
-          "LINK_ELBOW_YAW_L",
-          "LINK_ELBOW_YAW_R",
-          "LINK_ELBOW_END_L",
-          "LINK_ELBOW_END_R",
-        ),
-        min_delay_s=0.12,
-        max_delay_s=0.45,
-        lower_first_bonus=0.5,
-        timely_upper_bonus=1.0,
-        early_upper_penalty=2.0,
-        late_upper_penalty=0.2,
-        early_upper_force_scale=0.0,
-      ),
-      weight=1.0,
+    # "lower_then_upper_contact": RewardTermCfg(
+    #   func=mdp.LowerBodyThenUpperBodyContactReward(
+    #     sensor_name="body_contact_force",
+    #     lower_body_names=(
+    #       "LINK_BASE",
+    #       "LINK_HIP_PITCH_L",
+    #       "LINK_HIP_PITCH_R",
+    #       "LINK_HIP_ROLL_L",
+    #       "LINK_HIP_ROLL_R",
+    #       "LINK_HIP_YAW_L",
+    #       "LINK_HIP_YAW_R",
+    #       "LINK_KNEE_PITCH_L",
+    #       "LINK_KNEE_PITCH_R",
+    #     ),
+    #     upper_body_names=(
+    #       "LINK_TORSO_YAW",
+    #       "LINK_HEAD_YAW",
+    #       "LINK_SHOULDER_ROLL_L",
+    #       "LINK_SHOULDER_ROLL_R",
+    #       "LINK_SHOULDER_YAW_L",
+    #       "LINK_SHOULDER_YAW_R",
+    #       "LINK_ELBOW_PITCH_L",
+    #       "LINK_ELBOW_PITCH_R",
+    #       "LINK_ELBOW_YAW_L",
+    #       "LINK_ELBOW_YAW_R",
+    #       "LINK_ELBOW_END_L",
+    #       "LINK_ELBOW_END_R",
+    #     ),
+    #     min_delay_s=0.12,
+    #     max_delay_s=0.45,
+    #     lower_first_bonus=0.5,
+    #     timely_upper_bonus=1.0,
+    #     early_upper_penalty=2.0,
+    #     late_upper_penalty=0.2,
+    #     early_upper_force_scale=0.0,
+    #   ),
+    #   weight=1.0,
+    # ),
+    "motor_overcurrent": RewardTermCfg(
+      func=mdp.motor_overcurrent_penalty,
+      weight=1e-3,
+      params={
+        "command_name": "motion",
+        "scale": 1.0,
+        "threshold": 1.0,
+      },
     ),
-    # "motor_overcurrent": RewardTermCfg(
-    #   func=mdp.motor_overcurrent_penalty,
-    #   weight=1e-3,
-    #   params={
-    #     "command_name": "motion",
-    #     "scale": 1.0,
-    #     "threshold": 1.0,
-    #   },
-    # ),
-    # # 电机反电动势惩罚：torque 与 velocity 反向时 -tau*w/Pmax 超过阈值则惩罚
-    # "motor_back_emf": RewardTermCfg(
-    #   func=mdp.motor_back_emf_penalty,
-    #   weight=1e-2,
-    #   params={
-    #     "command_name": "motion",
-    #     "scale": 1.0,
-    #     "threshold": 0.1,
-    #     "p_max": 100.0,
-    #   },
-    # ),
+    # 电机反电动势惩罚：torque 与 velocity 反向时 -tau*w/Pmax 超过阈值则惩罚
+    "motor_back_emf": RewardTermCfg(
+      func=mdp.motor_back_emf_penalty,
+      weight=1e-2,
+      params={
+        "command_name": "motion",
+        "scale": 1.0,
+        "threshold": 0.1,
+        "p_max": 100.0,
+      },
+    ),
   }
 
   ##
@@ -395,14 +389,14 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
       func=nonfinite_state,
       params={"asset_cfg": SceneEntityCfg("robot")},
     ),
-    "forbidden_body_contact_force": TerminationTermCfg(
-      func=mdp.bad_body_contact_force,
-      params={
-        "sensor_name": "body_contact_force",
-        "body_names": (),  # Set per-robot.
-        "force_threshold": 1e9,  # Set per-robot.
-      },
-    ),
+    # "forbidden_body_contact_force": TerminationTermCfg(
+    #   func=mdp.bad_body_contact_force,
+    #   params={
+    #     "sensor_name": "body_contact_force",
+    #     "body_names": (),  # Set per-robot.
+    #     "force_threshold": 1e9,  # Set per-robot.
+    #   },
+    # ),
   }
 
   ##
@@ -552,17 +546,17 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
         ],
       },
     ),
-    "q25_effort_limit": CurriculumTermCfg(
-      func=q25_effort_limit_curriculum,
-      params={
-        "asset_cfg": SceneEntityCfg("robot"),
-        "actuator_indices": PM_Q25_ACTUATOR_INDICES,
-        "effort_stages": [
-          {"step": 0, "effort_limit": float(EFFORT_LIMIT_Q25)},
-          {"step": 30_000 * 32, "effort_limit": float(EFFORT_LIMIT_Q25) * 0.7},
-        ],
-      },
-    ),
+    # "q25_effort_limit": CurriculumTermCfg(
+    #   func=q25_effort_limit_curriculum,
+    #   params={
+    #     "asset_cfg": SceneEntityCfg("robot"),
+    #     "actuator_indices": PM_Q25_ACTUATOR_INDICES,
+    #     "effort_stages": [
+    #       {"step": 0, "effort_limit": float(EFFORT_LIMIT_Q25)},
+    #       {"step": 30_000 * 32, "effort_limit": float(EFFORT_LIMIT_Q25) * 0.7},
+    #     ],
+    #   },
+    # ),
   }
 
   ##

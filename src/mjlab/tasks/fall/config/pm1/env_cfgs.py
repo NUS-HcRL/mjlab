@@ -74,13 +74,13 @@ def pm1_flat_falling_env_cfg(
     body_names=("LINK_TORSO_YAW",),
   )
 
-  cfg.terminations["forbidden_body_contact_force"].params["body_names"] = (
-    "LINK_HEAD_YAW",
-    "LINK_TORSO_YAW",
-    "LINK_ELBOW_END_L",
-    "LINK_ELBOW_END_R",
-  )
-  cfg.terminations["forbidden_body_contact_force"].params["force_threshold"] = 500.0
+  # cfg.terminations["forbidden_body_contact_force"].params["body_names"] = (
+  #   "LINK_HEAD_YAW",
+  #   "LINK_TORSO_YAW",
+  #   "LINK_ELBOW_END_L",
+  #   "LINK_ELBOW_END_R",
+  # )
+  # cfg.terminations["forbidden_body_contact_force"].params["force_threshold"] = 500.0
 
   # PM1 LINK_BASE 在 MJCF 中 pos="0 0 0.82"，站立时 base 相对地面约 0.82 m
   # if "base_height" in cfg.rewards:

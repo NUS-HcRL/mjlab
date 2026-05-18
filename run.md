@@ -1,5 +1,5 @@
 训练
-python -m mjlab.scripts.train Mjlab-Falling-Flat-PM1-AMP --env.scene.num-envs 4096 --agent.max_iterations 40000
+python -m mjlab.scripts.train Mjlab-Falling-Flat-PM1 --env.scene.num-envs 4096 --agent.max_iterations 30000
 
 # 恢复训练 - 从 WandB 恢复（推荐）
 python -m mjlab.scripts.train Mjlab-Tracking-Flat-PM1 \
