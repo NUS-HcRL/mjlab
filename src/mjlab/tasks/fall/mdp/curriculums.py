@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, TypedDict
+from typing import TYPE_CHECKING, Literal, TypedDict
 from typing import Any, cast
 
 from typing_extensions import NotRequired
@@ -11,6 +11,10 @@ import torch
 from mjlab.asset_zoo.robots.engineai_pm01.pm01_8 import (
   EFFORT_LIMIT_Q25,
   PM_ACTION_SCALE,
+  SOLIMP_CONTACT_DEFAULT,
+  SOLIMP_CONTACT_SOFT_6mm,
+  SOLREF_CONTACT_DEFAULT,
+  SOLREF_CONTACT_SOFT_6mm,
 )
 from mjlab.entity import Entity
 from mjlab.envs.mdp.actions.joint_actions import JointPositionAction
@@ -56,6 +60,88 @@ class Q25EffortLimitStage(TypedDict):
 
   step: int
   effort_limit: float
+
+
+class SoftContactSolStage(TypedDict):
+  """Knee/elbow contact solref/solimp node (see ``fall_env_cfg`` pm_soft_contact)."""
+
+  step: int
+  profile: Literal["default", "soft_6mm"]
+
+
+_CONTACT_SOL_PROFILES: dict[str, tuple[tuple[float, ...], tuple[float, ...]]] = {
+  "default": (SOLREF_CONTACT_DEFAULT, SOLIMP_CONTACT_DEFAULT),
+  "soft_6mm": (SOLREF_CONTACT_SOFT_6mm, SOLIMP_CONTACT_SOFT_6mm),
+}
+
+
+def _set_geom_sol_params(
+  env: ManagerBasedRlEnv,
+  geom_ids: list[int],
+  solref: tuple[float, ...],
+  solimp: tuple[float, ...],
+) -> None:
+  """Write solref/solimp for geoms into CPU ``mj_model`` and batched sim model if present."""
+  mj = env.sim.mj_model
+  solref_np = np.asarray(solref, dtype=np.float64)
+  solimp_np = np.asarray(solimp, dtype=np.float64)
+  for gid in geom_ids:
+    mj.geom_solref[gid] = solref_np
+    imp = mj.geom_solimp[gid].copy()
+    imp[: len(solimp_np)] = solimp_np
+    mj.geom_solimp[gid] = imp
+
+  model = env.sim.model
+  if not hasattr(model, "geom_solref") or not hasattr(model, "geom_solimp"):
+    return
+
+  device = env.device
+  env_ids_all = torch.arange(env.num_envs, device=device, dtype=torch.int)
+  gid_t = torch.tensor(geom_ids, device=device, dtype=torch.long)
+  solref_t = torch.tensor(solref_np, device=device, dtype=torch.float32)
+  solimp_t = torch.tensor(solimp_np, device=device, dtype=torch.float32)
+  try:
+    model.geom_solref[env_ids_all[:, None], gid_t, :] = solref_t
+    model.geom_solimp[env_ids_all[:, None], gid_t, : solimp_t.numel()] = solimp_t
+  except (IndexError, RuntimeError, TypeError):
+    model.geom_solref[gid_t, :] = solref_t
+    model.geom_solimp[gid_t, : solimp_t.numel()] = solimp_t
+
+
+def pm_soft_contact_curriculum(
+  env: ManagerBasedRlEnv,
+  env_ids: torch.Tensor,
+  asset_cfg: SceneEntityCfg,
+  geom_names: tuple[str, ...],
+  sol_stages: list[SoftContactSolStage],
+) -> dict[str, torch.Tensor]:
+  """Stage knee/elbow collision solref/solimp (DEFAULT then SOFT_6mm).
+
+  Active stage is the last entry with ``step <= env.common_step_counter``.
+  """
+  del env_ids
+  active = sol_stages[0]
+  for stage in sol_stages:
+    if env.common_step_counter >= stage["step"]:
+      active = stage
+  profile = active["profile"]
+  solref, solimp = _CONTACT_SOL_PROFILES[profile]
+
+  asset: Entity = env.scene[asset_cfg.name]
+  geom_ids, matched = asset.find_geoms(geom_names, preserve_order=True)
+  if len(matched) != len(geom_names):
+    missing = set(geom_names) - set(matched)
+    raise ValueError(
+      f"pm_soft_contact_curriculum: geom(s) not found on {asset_cfg.name!r}: "
+      f"{sorted(missing)}"
+    )
+  _set_geom_sol_params(env, geom_ids, solref, solimp)
+
+  return {
+    "pm_soft_contact_profile": torch.tensor(
+      0.0 if profile == "default" else 1.0, dtype=torch.float32
+    ),
+  }
 
 
 def reset_push_curriculum(

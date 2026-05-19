@@ -9,6 +9,7 @@ import math
 from mjlab.asset_zoo.robots.engineai_pm01.pm01_8 import (
   EFFORT_LIMIT_Q25,
   PM_Q25_ACTUATOR_INDICES,
+  PM_SOFT_CONTACT_CURRICULUM_GEOM_NAMES,
 )
 from mjlab.envs import ManagerBasedRlEnvCfg
 from mjlab.envs.mdp.actions import JointPositionActionCfg
@@ -27,6 +28,7 @@ from mjlab.sim import MujocoCfg, SimulationCfg
 from mjlab.envs.amp import AMPCfg
 from mjlab.tasks.fall import mdp
 from mjlab.tasks.fall.mdp.curriculums import (
+  pm_soft_contact_curriculum,
   q25_effort_limit_curriculum,
   reset_force_pulse_curriculum,
   reset_initialization_curriculum,
@@ -560,6 +562,17 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
         "effort_stages": [
           {"step": 0, "effort_limit": float(EFFORT_LIMIT_Q25)},
           {"step": 30_000 * 32, "effort_limit": float(EFFORT_LIMIT_Q25) * 0.7},
+        ],
+      },
+    ),
+    "pm_soft_contact": CurriculumTermCfg(
+      func=pm_soft_contact_curriculum,
+      params={
+        "asset_cfg": SceneEntityCfg("robot"),
+        "geom_names": PM_SOFT_CONTACT_CURRICULUM_GEOM_NAMES,
+        "sol_stages": [
+          {"step": 0, "profile": "default"},
+          {"step": 30_000 * 32, "profile": "soft_6mm"},
         ],
       },
     ),

@@ -274,13 +274,13 @@ PM_NAMED_FULL_COLLISION = CollisionCfg(
     r"^collision_left_foot_toe$": SOLIMP_CONTACT_FOOT,
     r"^collision_right_foot$": SOLIMP_CONTACT_FOOT,
     r"^collision_right_foot_toe$": SOLIMP_CONTACT_FOOT,
-    # --- SOLIMP_CONTACT_SOFT_6mm (hip yaw / knee / shoulder yaw / elbow sphere) ---
-    r"^collision_left_knee_pitch$": SOLIMP_CONTACT_SOFT_6mm,
-    r"^collision_right_knee_pitch$": SOLIMP_CONTACT_SOFT_6mm,
-    r"^collision_left_elbow_pitch$": SOLIMP_CONTACT_SOFT_6mm,
-    r"^collision_left_elbow_capsule$": SOLIMP_CONTACT_SOFT_6mm,
-    r"^collision_right_elbow_pitch$": SOLIMP_CONTACT_SOFT_6mm,
-    r"^collision_right_elbow_capsule$": SOLIMP_CONTACT_SOFT_6mm,
+    # --- knee / elbow: DEFAULT at spawn; see ``pm_soft_contact`` curriculum for 6mm ---
+    r"^collision_left_knee_pitch$": SOLIMP_CONTACT_DEFAULT,
+    r"^collision_right_knee_pitch$": SOLIMP_CONTACT_DEFAULT,
+    r"^collision_left_elbow_pitch$": SOLIMP_CONTACT_DEFAULT,
+    r"^collision_left_elbow_capsule$": SOLIMP_CONTACT_DEFAULT,
+    r"^collision_right_elbow_pitch$": SOLIMP_CONTACT_DEFAULT,
+    r"^collision_right_elbow_capsule$": SOLIMP_CONTACT_DEFAULT,
     
     # --- SOLIMP_CONTACT_DEFAULT (everything else) ---
     r"^collision_base_lower$": SOLIMP_CONTACT_DEFAULT,
@@ -318,17 +318,13 @@ PM_NAMED_FULL_COLLISION = CollisionCfg(
   #   r"^collision_right_foot_toe$": (0.0005, 0.9),
   # },
   solref={
-    # --- SOLREF_CONTACT_SOFT_6mm (hip yaw / knee / shoulder yaw / elbow sphere) ---
-    r"^collision_left_hip_yaw$": SOLREF_CONTACT_SOFT_6mm,
-    r"^collision_right_hip_yaw$": SOLREF_CONTACT_SOFT_6mm,
-    r"^collision_left_knee_pitch$": SOLREF_CONTACT_SOFT_6mm,
-    r"^collision_left_knee1$": SOLREF_CONTACT_SOFT_6mm,
-    r"^collision_right_knee_pitch$": SOLREF_CONTACT_SOFT_6mm,
-    r"^collision_right_knee1$": SOLREF_CONTACT_SOFT_6mm,
-    r"^collision_left_elbow_pitch$": SOLREF_CONTACT_SOFT_6mm,
-    r"^collision_right_elbow_pitch$": SOLREF_CONTACT_SOFT_6mm,
-    r"^collision_left_shoulder_yaw$": SOLREF_CONTACT_SOFT_6mm,
-    r"^collision_right_shoulder_yaw$": SOLREF_CONTACT_SOFT_6mm,
+    # --- knee / elbow: DEFAULT at spawn; see ``pm_soft_contact`` curriculum for 6mm ---
+    r"^collision_left_knee_pitch$": SOLREF_CONTACT_DEFAULT,
+    r"^collision_right_knee_pitch$": SOLREF_CONTACT_DEFAULT,
+    r"^collision_left_elbow_pitch$": SOLREF_CONTACT_DEFAULT,
+    r"^collision_left_elbow_capsule$": SOLREF_CONTACT_DEFAULT,
+    r"^collision_right_elbow_pitch$": SOLREF_CONTACT_DEFAULT,
+    r"^collision_right_elbow_capsule$": SOLREF_CONTACT_DEFAULT,
     # --- feet (sole + toe) ---
     r"^collision_left_foot$": SOLREF_CONTACT_FOOT,
     r"^collision_left_foot_toe$": SOLREF_CONTACT_FOOT,
@@ -337,14 +333,12 @@ PM_NAMED_FULL_COLLISION = CollisionCfg(
     # --- SOLREF_CONTACT_DEFAULT (everything else; edit one line to tune a single link) ---
     r"^collision_base_lower$": SOLREF_CONTACT_DEFAULT,
     r"^collision_head1$": SOLREF_CONTACT_DEFAULT,
-    r"^collision_left_elbow_capsule$": SOLREF_CONTACT_DEFAULT,
     r"^collision_left_elbow_end$": SOLREF_CONTACT_DEFAULT,
     r"^collision_left_elbow_yaw$": SOLREF_CONTACT_DEFAULT,
     r"^collision_left_hip$": SOLREF_CONTACT_DEFAULT,
     r"^collision_left_hip_roll$": SOLREF_CONTACT_DEFAULT,
     r"^collision_left_shoulder_roll$": SOLREF_CONTACT_DEFAULT,
     r"^collision_left_shoulder_roll1$": SOLREF_CONTACT_DEFAULT,
-    r"^collision_right_elbow_capsule$": SOLREF_CONTACT_DEFAULT,
     r"^collision_right_elbow_end$": SOLREF_CONTACT_DEFAULT,
     r"^collision_right_elbow_yaw$": SOLREF_CONTACT_DEFAULT,
     r"^collision_right_hip$": SOLREF_CONTACT_DEFAULT,
@@ -352,6 +346,12 @@ PM_NAMED_FULL_COLLISION = CollisionCfg(
     r"^collision_right_shoulder_roll$": SOLREF_CONTACT_DEFAULT,
     r"^collision_right_shoulder_roll1$": SOLREF_CONTACT_DEFAULT,
     r"^collision_torso_upper$": SOLREF_CONTACT_DEFAULT,
+    r"^collision_left_shoulder_yaw$": SOLREF_CONTACT_DEFAULT,
+    r"^collision_right_shoulder_yaw$": SOLREF_CONTACT_DEFAULT,
+    r"^collision_left_hip_yaw$": SOLREF_CONTACT_DEFAULT,
+    r"^collision_right_hip_yaw$": SOLREF_CONTACT_DEFAULT,
+    r"^collision_left_knee1$": SOLREF_CONTACT_DEFAULT,
+    r"^collision_right_knee1$": SOLREF_CONTACT_DEFAULT,
   },
   # solimp="0.9 0.95" solimp="0.0005, 1"
   disable_other_geoms=False,
@@ -373,6 +373,16 @@ PM_ARTICULATION = EntityArticulationInfoCfg(
 # Indices into `Entity.actuators` for actuator groups that use EFFORT_LIMIT_Q25
 # (same order as PM_ARTICULATION.actuators above).
 PM_Q25_ACTUATOR_INDICES: tuple[int, ...] = (2, 3, 4, 5, 6)
+
+# Geoms whose solref/solimp are staged by ``pm_soft_contact`` fall curriculum.
+PM_SOFT_CONTACT_CURRICULUM_GEOM_NAMES: tuple[str, ...] = (
+  "collision_left_knee_pitch",
+  "collision_right_knee_pitch",
+  "collision_left_elbow_pitch",
+  "collision_left_elbow_capsule",
+  "collision_right_elbow_pitch",
+  "collision_right_elbow_capsule",
+)
 
 PM_ROBOT_CFG = EntityCfg(
   init_state=PM_HOME_KEYFRAME,
