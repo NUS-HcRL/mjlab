@@ -53,18 +53,23 @@ def bad_body_contact_force(
   sensor_name: str,
   body_names: tuple[str, ...],
   body_force_thresholds: dict[str, float],
-  force_threshold: float | None = None,
 ) -> torch.Tensor:
   """Terminate when any named body contact-force norm exceeds its threshold.
 
-  Each body uses ``body_force_thresholds[name]`` when present; otherwise
-  ``force_threshold`` (required as fallback when a body is missing from the dict).
+  Every name in ``body_names`` must appear in ``body_force_thresholds``.
   """
   sensor: ContactSensor = env.scene[sensor_name]
   assert sensor.data.force is not None
 
   if not body_names:
     return torch.zeros(env.num_envs, dtype=torch.bool, device=sensor.data.force.device)
+
+  missing_thresholds = set(body_names) - set(body_force_thresholds)
+  if missing_thresholds:
+    raise ValueError(
+      "bad_body_contact_force: body_force_thresholds missing entries for "
+      f"{sorted(missing_thresholds)}"
+    )
 
   slot_body_names = []
   seen = set()
@@ -74,20 +79,17 @@ def bad_body_contact_force(
       seen.add(slot.primary_name)
 
   body_to_index = {name: i for i, name in enumerate(slot_body_names)}
+  missing_bodies = set(body_names) - set(body_to_index)
+  if missing_bodies:
+    raise ValueError(
+      "bad_body_contact_force: body_names not found on contact sensor "
+      f"{sensor_name!r}: {sorted(missing_bodies)}"
+    )
+
   terminate = torch.zeros(env.num_envs, dtype=torch.bool, device=sensor.data.force.device)
   for name in body_names:
-    if name not in body_to_index:
-      continue
-    if name in body_force_thresholds:
-      threshold = body_force_thresholds[name]
-    elif force_threshold is not None:
-      threshold = force_threshold
-    else:
-      raise ValueError(
-        f"bad_body_contact_force: no threshold for body {name!r}; "
-        "add it to body_force_thresholds or set force_threshold."
-      )
     idx = body_to_index[name]
+    threshold = body_force_thresholds[name]
     force_norm = torch.norm(sensor.data.force[:, idx], dim=-1)
     terminate |= force_norm > threshold
   return terminate

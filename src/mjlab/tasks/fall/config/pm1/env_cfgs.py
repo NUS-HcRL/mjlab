@@ -91,7 +91,6 @@ def pm1_flat_falling_env_cfg(
     "LINK_ELBOW_END_L",
     "LINK_ELBOW_END_R",
   )
-  cfg.terminations["forbidden_body_contact_force"].params.pop("force_threshold", None)
   cfg.terminations["forbidden_body_contact_force"].params["body_force_thresholds"] = {
     "LINK_HEAD_YAW": 200.0,
     "LINK_TORSO_YAW": 500.0,
@@ -109,6 +108,7 @@ def pm1_flat_falling_env_cfg(
   cfg.events["reset_base"].params["motion_files"] = (
     _pm1_fall_reset_motion_csv_paths() if use_data_reset else ()
   )
+  # cfg.events["reset_base"].params["motion_files"] = ("data/amp_pm1_fall/policy_switch_walking_combined.csv",)
   cfg.events["reset_base"].params["data_root_body_name"] = "LINK_BASE"
   if not use_data_reset and cfg.curriculum is not None and "reset_init" in cfg.curriculum:
     init_stages = cfg.curriculum["reset_init"].params["init_stages"]
