@@ -92,10 +92,10 @@ def pm1_flat_falling_env_cfg(
     "LINK_ELBOW_END_R",
   )
   cfg.terminations["forbidden_body_contact_force"].params["body_force_thresholds"] = {
-    "LINK_HEAD_YAW": 200.0,
+    "LINK_HEAD_YAW": 500.0,
     "LINK_TORSO_YAW": 500.0,
-    "LINK_ELBOW_END_L": 200.0,
-    "LINK_ELBOW_END_R": 200.0,
+    "LINK_ELBOW_END_L": 500.0,
+    "LINK_ELBOW_END_R": 500.0,
   }
 
   # PM1 LINK_BASE 在 MJCF 中 pos="0 0 0.82"，站立时 base 相对地面约 0.82 m
