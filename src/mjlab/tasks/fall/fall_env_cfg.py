@@ -362,7 +362,7 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
         late_upper_penalty=0.2,
         early_upper_force_scale=0.0,
       ),
-      weight=0.005,
+      weight=0.01,
     ),
     # "motor_overcurrent": RewardTermCfg(
     #   func=mdp.motor_overcurrent_penalty,
