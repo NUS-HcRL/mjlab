@@ -216,8 +216,8 @@ PM_ACTUATOR_HEAD = BuiltinPositionActuatorCfg(
 SOLIMP_CONTACT_SOFT_6mm = (0.9, 0.95, 0.001)  # 6 mm compliant layer
 SOLREF_CONTACT_SOFT_6mm = (0.02, 1.0)
 # default solref
-SOLIMP_CONTACT_DEFAULT = (0.9, 0.95, 0.001)  # MuJoCo 默认 0.9, 0.95, 0.001
-SOLREF_CONTACT_DEFAULT = (0.02, 1.0) # MuJoCo 默认 0.02, 1.0
+SOLIMP_CONTACT_DEFAULT = (0.9, 0.95, 0.023)  # MuJoCo 默认 0.9, 0.95, 0.001
+SOLREF_CONTACT_DEFAULT = (0.0005, 1.0) # MuJoCo 默认 0.02, 1.0
 # Sole + toe contact (not ankle proxy spheres).
 SOLIMP_CONTACT_FOOT = (0.9, 0.95, 0.023)
 SOLREF_CONTACT_FOOT = (0.0005, 1.0)
