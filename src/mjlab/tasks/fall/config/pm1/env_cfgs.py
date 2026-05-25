@@ -1,5 +1,7 @@
 """PM1 flat fall environment configurations."""
 
+from pathlib import Path
+
 from mjlab.asset_zoo.robots import (
   PM_ACTION_SCALE,
   PM_ROBOT_CFG,
@@ -9,6 +11,9 @@ from mjlab.envs.mdp.actions import JointPositionActionCfg
 from mjlab.managers.scene_entity_config import SceneEntityCfg
 from mjlab.sensor import ContactMatch, ContactSensorCfg
 from mjlab.tasks.fall.fall_env_cfg import make_fall_env_cfg
+
+# Repo root: .../src/mjlab/tasks/fall/config/pm1/env_cfgs.py -> parents[5] == "src"
+_PM1_FALL_DATA_RESET_DIR = Path(__file__).resolve().parents[5].parent / "data" / "amp_pm1_fall"
 
 
 def pm1_flat_falling_env_cfg(
@@ -90,7 +95,9 @@ def pm1_flat_falling_env_cfg(
 
   # Data-driven reset poses for reset_base (CSV); independent of AMP / cfg.amp.
   cfg.events["reset_base"].params["motion_files"] = (
-    ("data/amp_pm1_fall/policy_switch_walking_combined.csv",) if use_data_reset else ()
+    tuple(str(p) for p in sorted(_PM1_FALL_DATA_RESET_DIR.glob("*.csv")))
+    if use_data_reset
+    else ()
   )
   cfg.events["reset_base"].params["data_root_body_name"] = "LINK_BASE"
   if not use_data_reset and cfg.curriculum is not None and "reset_init" in cfg.curriculum:

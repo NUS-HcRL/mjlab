@@ -105,10 +105,10 @@ PM_HOME_KEYFRAME = EntityCfg.InitialStateCfg(
 # Physical Parameters (based on pm.py motor specs)
 # High-torque joints: Q90 motor (HIP_PITCH, HIP_ROLL, KNEE_PITCH)
 ARMATURE_Q90 = 0.0453
-# EFFORT_LIMIT_Q90 = 164.0
+EFFORT_LIMIT_Q90 = 164.0
 # EFFORT_LIMIT_Q90 = 147.6  # 164.0 * 0.9
 # EFFORT_LIMIT_Q90 = 139.4  # 164.0 * 0.85
-EFFORT_LIMIT_Q90 = 131.2  # 164.0 * 0.8
+# EFFORT_LIMIT_Q90 = 131.2  # 164.0 * 0.8
 VELOCITY_LIMIT_Q90 = 26.3
 
 # Low-torque joints: Q25 motor (HIP_YAW, ANKLE, WAIST, SHOULDER, ELBOW, HEAD)
