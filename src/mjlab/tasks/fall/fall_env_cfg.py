@@ -441,7 +441,7 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
             "tilt_joint_velocity_range": (-0.03, 0.03),
           },
           {
-            "step": 6_000 * 32,
+            "step": 4_000 * 32,
             "data_probability": 0.1,
             "tilt_pose_range": {
               "x": (-0.6, 0.6),
@@ -456,7 +456,7 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
             "tilt_joint_velocity_range": (-0.05, 0.05),
           },
           {
-            "step": 15_000 * 32,
+            "step": 8_000 * 32,
             "data_probability": 0.25,
             "tilt_pose_range": {
               "x": (-1, 1),
@@ -560,7 +560,7 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
         "actuator_indices": PM_Q25_ACTUATOR_INDICES,
         "effort_stages": [
           {"step": 0, "effort_limit": float(EFFORT_LIMIT_Q25)},
-          {"step": 30_000 * 32, "effort_limit": float(EFFORT_LIMIT_Q25) * 0.7},
+          {"step": 24_000 * 32, "effort_limit": float(EFFORT_LIMIT_Q25) * 0.7},
         ],
       },
     ),
@@ -571,7 +571,7 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
         "geom_names": PM_SOFT_CONTACT_CURRICULUM_GEOM_NAMES,
         "sol_stages": [
           {"step": 0, "profile": "default"},
-          {"step": 30_000 * 32, "profile": "soft_6mm"},
+          {"step": 28_000 * 32, "profile": "soft_6mm"},
         ],
       },
     ),
