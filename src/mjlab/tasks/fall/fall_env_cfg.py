@@ -259,23 +259,22 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
     ),
     "reduce_contact_force": RewardTermCfg(
       func=mdp.reduce_contact_force_weighted,
-      weight=0.01, # 0.01
+      weight=0.015, # 0.01
       params={
         "sensor_name": "body_contact_force",
         "high_weight_bodies": (
           "LINK_ELBOW_END_L",
           "LINK_ELBOW_END_R",
           "LINK_HEAD_YAW",
+          "LINK_TORSO_YAW",
         ),
         "medium_weight_bodies": (
           "LINK_SHOULDER_ROLL_L",
           "LINK_SHOULDER_ROLL_R",
           "LINK_SHOULDER_YAW_L",
           "LINK_SHOULDER_YAW_R",
-          "LINK_KNEE_PITCH_L",
-          "LINK_KNEE_PITCH_R",
         ),
-        "high_weight": 100.0,
+        "high_weight": 50.0,
         "medium_weight": 1.0,
         "low_weight": 0.5,
         "alpha": 0.3,
@@ -363,20 +362,20 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
       params={
         "command_name": "motion",
         "scale": 1.0,
-        "threshold": 1.0,
+        "threshold": 0.9,
       },
     ),
     # 电机反电动势惩罚：torque 与 velocity 反向时 -tau*w/Pmax 超过阈值则惩罚
-    "motor_back_emf": RewardTermCfg(
-      func=mdp.motor_back_emf_penalty,
-      weight=1e-2,
-      params={
-        "command_name": "motion",
-        "scale": 1.0,
-        "threshold": 0.1,
-        "p_max": 100.0,
-      },
-    ),
+    # "motor_back_emf": RewardTermCfg(
+    #   func=mdp.motor_back_emf_penalty,
+    #   weight=1e-2,
+    #   params={
+    #     "command_name": "motion",
+    #     "scale": 1.0,
+    #     "threshold": 0.1,
+    #     "p_max": 100.0,
+    #   },
+    # ),
   }
 
   ##
