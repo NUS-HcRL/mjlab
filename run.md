@@ -129,8 +129,8 @@ python -m mjlab.scripts.play Mjlab-Tracking-Flat-PM1 \
   --protector-map-back yz_map_back_zero.tsv
 
 python -m mjlab.scripts.play Mjlab-Tracking-Flat-PM1 \
-  --motion-file motion_file/pm_fall4:v0/toFront_1_converted_50fps.npz \
-  --wandb-run-path 1205492990-nus/mjlab/u0uzc0vi \
+  --motion-file motion_file/pm_fall4:v0/toBack_2_converted_50fps.npz \
+  --wandb-run-path 1205492990-nus/mjlab/5qdwlr6n \
   --use-protector-map False
 ```
 
