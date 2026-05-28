@@ -268,6 +268,7 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
           "LINK_ELBOW_END_L",
           "LINK_ELBOW_END_R",
           "LINK_HEAD_YAW",
+          "LINK_TORSO_YAW",
         ),
         "medium_weight_bodies": (
           "LINK_ELBOW_PITCH_L",
@@ -276,7 +277,6 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
           "LINK_ELBOW_YAW_R",
         ),
         "shoulder_weight_bodies": (
-          "LINK_TORSO_YAW",
           "LINK_SHOULDER_ROLL_L",
           "LINK_SHOULDER_ROLL_R",
           "LINK_SHOULDER_YAW_L",
@@ -354,7 +354,7 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
           "LINK_ELBOW_END_L",
           "LINK_ELBOW_END_R",
         ),
-        min_delay_s=0.25,
+        min_delay_s=0.3,
         max_delay_s=0.6,
         lower_first_bonus=0.5,
         timely_upper_bonus=1.0,
@@ -362,7 +362,7 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
         late_upper_penalty=0.2,
         early_upper_force_scale=0.0,
       ),
-      weight=0.01,
+      weight=0.05,
     ),
     # "motor_overcurrent": RewardTermCfg(
     #   func=mdp.motor_overcurrent_penalty,
@@ -441,7 +441,7 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
             "tilt_joint_velocity_range": (-0.03, 0.03),
           },
           {
-            "step": 4_000 * 32,
+            "step": 6_000 * 32,
             "data_probability": 0.1,
             "tilt_pose_range": {
               "x": (-0.6, 0.6),
@@ -456,7 +456,7 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
             "tilt_joint_velocity_range": (-0.05, 0.05),
           },
           {
-            "step": 8_000 * 32,
+            "step": 15_000 * 32,
             "data_probability": 0.25,
             "tilt_pose_range": {
               "x": (-1, 1),
@@ -560,7 +560,7 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
         "actuator_indices": PM_Q25_ACTUATOR_INDICES,
         "effort_stages": [
           {"step": 0, "effort_limit": float(EFFORT_LIMIT_Q25)},
-          {"step": 24_000 * 32, "effort_limit": float(EFFORT_LIMIT_Q25) * 0.7},
+          {"step": 30_000 * 32, "effort_limit": float(EFFORT_LIMIT_Q25) * 0.7},
         ],
       },
     ),
@@ -571,7 +571,7 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
         "geom_names": PM_SOFT_CONTACT_CURRICULUM_GEOM_NAMES,
         "sol_stages": [
           {"step": 0, "profile": "default"},
-          {"step": 28_000 * 32, "profile": "soft_6mm"},
+          {"step": 35_000 * 32, "profile": "soft_6mm"},
         ],
       },
     ),
@@ -617,7 +617,7 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
       ),
     ),
     decimation=4,
-    episode_length_s=6.0,
+    episode_length_s=4.0,
     post_reset_freeze_steps=0,
     amp=AMPCfg(
       # Keep root z for fall-state awareness, but drop root x/y and root 6D
