@@ -261,7 +261,7 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
     ),
     "reduce_contact_force": RewardTermCfg(
       func=mdp.reduce_contact_force_weighted,
-      weight=0.015, # 0.01
+      weight=0.012, # 0.01
       params={
         "sensor_name": "body_contact_force",
         "high_weight_bodies": (
@@ -282,12 +282,12 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
           "LINK_SHOULDER_YAW_L",
           "LINK_SHOULDER_YAW_R",
         ),
-        "high_weight": 100.0,
+        "high_weight": 50.0,
         "shoulder_weight": 20.0,
         "medium_weight": 2.0,
         "low_weight": 0.5,
-        "alpha": 1,
-        "squash_scale": 0,
+        "alpha": 0.5,
+        "squash_scale": 0.02,
       },
     ),
     "control_descent_speed": RewardTermCfg(
