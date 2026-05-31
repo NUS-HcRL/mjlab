@@ -364,15 +364,15 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
       ),
       weight=0.01,
     ),
-    # "motor_overcurrent": RewardTermCfg(
-    #   func=mdp.motor_overcurrent_penalty,
-    #   weight=1e-3,
-    #   params={
-    #     "command_name": "motion",
-    #     "scale": 1.0,
-    #     "threshold": 1.0,
-    #   },
-    # ),
+    "motor_overcurrent": RewardTermCfg(
+      func=mdp.motor_overcurrent_penalty,
+      weight=1e-3,
+      params={
+        "command_name": "motion",
+        "scale": 1.0,
+        "threshold": 1.0,
+      },
+    ),
     # # 电机反电动势惩罚：torque 与 velocity 反向时 -tau*w/Pmax 超过阈值则惩罚
     # "motor_back_emf": RewardTermCfg(
     #   func=mdp.motor_back_emf_penalty,
@@ -427,7 +427,7 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
         "init_stages": [
           {
             "step": 0,
-            "data_probability": 0.05,
+            "data_probability": 0.1,
             "tilt_pose_range": {
               "x": (-0.4, 0.4),
               "y": (-0.4, 0.4),
@@ -442,7 +442,7 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
           },
           {
             "step": 6_000 * 32,
-            "data_probability": 0.1,
+            "data_probability": 0.25,
             "tilt_pose_range": {
               "x": (-0.6, 0.6),
               "y": (-0.6, 0.6),
@@ -457,7 +457,7 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
           },
           {
             "step": 15_000 * 32,
-            "data_probability": 0.25,
+            "data_probability": 0.45,
             "tilt_pose_range": {
               "x": (-1, 1),
               "y": (-1, 1),
@@ -533,7 +533,7 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
             },
           },
           {
-            "step": 10_000 * 32,
+            "step": 6_000 * 32,
             "duration_steps_range": (4, 15),
             "force_axis_range": {
               "x": (-180.0, 180.0),
@@ -542,12 +542,12 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
             },
           },
           {
-            "step": 15_000 * 32,
+            "step": 12_000 * 32,
             "duration_steps_range": (5, 20),
             "force_axis_range": {
-              "x": (-240.0, 240.0),
-              "y": (-240.0, 240.0),
-              "z": (-30.0, -30.0),
+              "x": (-260.0, 260.0),
+              "y": (-260.0, 260.0),
+              "z": (-50.0, -50.0),
             },
           },
         ],
@@ -560,7 +560,7 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
         "actuator_indices": PM_Q25_ACTUATOR_INDICES,
         "effort_stages": [
           {"step": 0, "effort_limit": float(EFFORT_LIMIT_Q25)},
-          {"step": 30_000 * 32, "effort_limit": float(EFFORT_LIMIT_Q25) * 0.7},
+          {"step": 26_000 * 32, "effort_limit": float(EFFORT_LIMIT_Q25) * 0.7},
         ],
       },
     ),
@@ -571,7 +571,7 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
         "geom_names": PM_SOFT_CONTACT_CURRICULUM_GEOM_NAMES,
         "sol_stages": [
           {"step": 0, "profile": "default"},
-          {"step": 35_000 * 32, "profile": "soft_6mm"},
+          {"step": 33_000 * 32, "profile": "soft_6mm"},
         ],
       },
     ),
@@ -617,7 +617,7 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
       ),
     ),
     decimation=4,
-    episode_length_s=6.0,
+    episode_length_s=4.0,
     post_reset_freeze_steps=0,
     amp=AMPCfg(
       # Keep root z for fall-state awareness, but drop root x/y and root 6D

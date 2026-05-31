@@ -93,9 +93,9 @@ def pm1_flat_falling_env_cfg(
   )
   cfg.terminations["forbidden_body_contact_force"].params["body_force_thresholds"] = {
     "LINK_HEAD_YAW": 600.0,
-    "LINK_TORSO_YAW": 1000.0,
-    "LINK_ELBOW_END_L": 800.0,
-    "LINK_ELBOW_END_R": 800.0,
+    "LINK_TORSO_YAW": 600.0,
+    "LINK_ELBOW_END_L": 600.0,
+    "LINK_ELBOW_END_R": 600.0,
   }
 
   # PM1 LINK_BASE 在 MJCF 中 pos="0 0 0.82"，站立时 base 相对地面约 0.82 m
@@ -103,12 +103,10 @@ def pm1_flat_falling_env_cfg(
   #   cfg.rewards["base_height"].params["nominal_height"] = 0.82
 
   cfg.viewer.body_name = "LINK_TORSO_YAW"
-
-  # reset_base: pool = concat of all rows from every ``data/amp_pm1_fall/*.csv`` (sorted).
-  # cfg.events["reset_base"].params["motion_files"] = (
-  #   _pm1_fall_reset_motion_csv_paths() if use_data_reset else ()
-  # )
-  cfg.events["reset_base"].params["motion_files"] = ("data/amp_pm1_fall/policy_switch_walking_combined.csv",)
+  cfg.events["reset_base"].params["motion_files"] = (
+    _pm1_fall_reset_motion_csv_paths() if use_data_reset else ()
+  )
+  # cfg.events["reset_base"].params["motion_files"] = ("data/amp_pm1_fall/policy_switch_walking_combined.csv",)
   cfg.events["reset_base"].params["data_root_body_name"] = "LINK_BASE"
   if not use_data_reset and cfg.curriculum is not None and "reset_init" in cfg.curriculum:
     init_stages = cfg.curriculum["reset_init"].params["init_stages"]
@@ -118,14 +116,14 @@ def pm1_flat_falling_env_cfg(
   # AMP: expert ``.npz`` only (do not mix with reset CSV pool above).
   if cfg.amp is not None:
     cfg.amp.motion_file = [
-      "motion_file/pm_fall4:v0/Back_1_converted_50fps.npz",
+      "motion_file/pm_fall4:v0/Back_3_converted.npz",
       "motion_file/pm_fall4:v0/Front_1_converted_50fps.npz",
       "motion_file/pm_fall4:v0/Left_1_converted_50fps.npz",
       "motion_file/pm_fall4:v0/Right_1_converted_50fps.npz",
       "motion_file/pm_fall4:v0/LeftFront_1_converted_50fps.npz",
-      "motion_file/pm_fall4:v0/LeftBack_1_converted_50fps.npz",
+      "motion_file/pm_fall4:v0/LeftBack_2_converted.npz",
       "motion_file/pm_fall4:v0/RightFront_1_converted_50fps.npz",
-      "motion_file/pm_fall4:v0/RightBack_1_converted_50fps.npz",
+      "motion_file/pm_fall4:v0/RightBack_2_converted.npz",
     ]
 
   # PM1 IMU 传感器名与 G1 不同：imu_angular_velocity / imu_link_linear_velocity
