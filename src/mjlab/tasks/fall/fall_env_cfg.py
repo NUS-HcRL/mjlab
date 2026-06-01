@@ -38,6 +38,7 @@ from mjlab.tasks.fall.mdp.curriculums import (
 from mjlab.tasks.fall.mdp.events import (
   apply_external_force_torque_axiswise_pulse,
   push_by_setting_velocity_preserve_data,
+  randomize_gravity,
 )
 from mjlab.tasks.fall.mdp.terminations import nonfinite_state
 from mjlab.terrains import TerrainImporterCfg
@@ -245,6 +246,32 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
         "ranges": (0.3, 1.2),
       },
     ),
+    "base_com": EventTermCfg(
+      mode="startup",
+      func=mdp.randomize_field,
+      domain_randomization=True,
+      params={
+        "asset_cfg": SceneEntityCfg("robot", body_names=()),  # Set per-robot.
+        "operation": "add",
+        "field": "body_ipos",
+        "ranges": {
+          0: (-0.025, 0.025),
+          1: (-0.05, 0.05),
+          2: (-0.05, 0.05),
+        },
+      },
+    ),
+    "randomize_gravity": EventTermCfg(
+      mode="startup",
+      func=randomize_gravity,
+      params={
+        "asset_cfg": SceneEntityCfg("robot"),
+        "nominal_gravity": (0.0, 0.0, -9.81),
+        "roll_range": (-0.08, 0.08),
+        "pitch_range": (-0.08, 0.08),
+        "magnitude_range": (0.92, 1.08),
+      },
+    ),
   }
 
   ##
@@ -373,17 +400,6 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
         "threshold": 1.0,
       },
     ),
-    # # 电机反电动势惩罚：torque 与 velocity 反向时 -tau*w/Pmax 超过阈值则惩罚
-    # "motor_back_emf": RewardTermCfg(
-    #   func=mdp.motor_back_emf_penalty,
-    #   weight=1e-2,
-    #   params={
-    #     "command_name": "motion",
-    #     "scale": 1.0,
-    #     "threshold": 0.1,
-    #     "p_max": 100.0,
-    #   },
-    # ),
   }
 
   ##

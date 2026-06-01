@@ -7,7 +7,12 @@ import torch
 
 from mjlab.entity import Entity
 from mjlab.managers.scene_entity_config import SceneEntityCfg
-from mjlab.utils.lab_api.math import quat_from_euler_xyz, quat_mul, sample_uniform
+from mjlab.utils.lab_api.math import (
+  quat_apply,
+  quat_from_euler_xyz,
+  quat_mul,
+  sample_uniform,
+)
 
 if TYPE_CHECKING:
   from mjlab.envs import ManagerBasedRlEnv
@@ -640,3 +645,51 @@ def apply_external_force_torque_axiswise_pulse(
   steps_left[target_env_ids] = int(duration_steps)
   if cooldown_steps > 0:
     cooldown_left[target_env_ids] = int(cooldown_steps)
+
+
+def randomize_gravity(
+  env: ManagerBasedRlEnv,
+  env_ids: torch.Tensor | None,
+  asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
+  nominal_gravity: tuple[float, float, float] = (0.0, 0.0, -9.81),
+  roll_range: tuple[float, float] = (-0.08, 0.08),
+  pitch_range: tuple[float, float] = (-0.08, 0.08),
+  magnitude_range: tuple[float, float] = (0.92, 1.08),
+) -> None:
+  """Randomize world gravity and sync ``EntityData.gravity_vec_w`` for projected-gravity obs.
+
+  Samples a small roll/pitch tilt and magnitude scale around ``nominal_gravity``. When the
+  batched sim exposes independent rows in ``model.opt.gravity``, each env gets its own
+  sample; otherwise one sample is applied to every env (shared MuJoCo option buffer).
+  """
+  if env_ids is None:
+    env_ids = torch.arange(env.num_envs, device=env.device, dtype=torch.long)
+  else:
+    env_ids = env_ids.to(device=env.device, dtype=torch.long)
+
+  asset: Entity = env.scene[asset_cfg.name]
+  n = env_ids.numel()
+  roll = sample_uniform(roll_range[0], roll_range[1], (n,), device=env.device)
+  pitch = sample_uniform(pitch_range[0], pitch_range[1], (n,), device=env.device)
+  magnitude = sample_uniform(
+    magnitude_range[0], magnitude_range[1], (n,), device=env.device
+  )
+
+  g_nom = torch.tensor(nominal_gravity, device=env.device, dtype=torch.float32)
+  g_scale = torch.linalg.vector_norm(g_nom).clamp_min(1e-6)
+  g_unit = g_nom / g_scale
+
+  tilt_quat = quat_from_euler_xyz(roll, pitch, torch.zeros_like(roll))
+  g_tilted = quat_apply(tilt_quat, g_unit.unsqueeze(0).expand(n, -1))
+  g_world = g_tilted * (magnitude * g_scale).unsqueeze(-1)
+  g_dir = g_world / torch.linalg.vector_norm(g_world, dim=-1, keepdim=True).clamp_min(1e-6)
+
+  gravity_field = env.sim.model.opt.gravity
+  if gravity_field.ndim == 1 or gravity_field.shape[0] == 1:
+    g_shared = g_world[0]
+    gravity_field[:] = g_shared
+    env.sim.mj_model.opt.gravity[:] = g_shared.detach().cpu().numpy()
+    asset.data.gravity_vec_w[env_ids] = g_dir[0].unsqueeze(0).expand(n, -1)
+  else:
+    gravity_field[env_ids] = g_world
+    asset.data.gravity_vec_w[env_ids] = g_dir

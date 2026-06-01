@@ -80,6 +80,7 @@ def pm1_flat_falling_env_cfg(
   cfg.events["foot_friction"].params[
     "asset_cfg"
   ].geom_names = r"^collision_(left|right)_foot(_toe)?$"
+  cfg.events["base_com"].params["asset_cfg"].body_names = ("LINK_TORSO_YAW",)
   cfg.events["push_force_pulse"].params["asset_cfg"] = SceneEntityCfg(
     "robot",
     body_names=("LINK_TORSO_YAW",),
