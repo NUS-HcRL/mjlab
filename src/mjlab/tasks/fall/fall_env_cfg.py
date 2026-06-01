@@ -623,7 +623,7 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
       # Keep root z for fall-state awareness, but drop root x/y and root 6D
       # orientation so the discriminator cannot separate expert/policy too
       # easily using obvious global pose shortcuts.
-      num_disc_obs_steps=2,  # 52-dim per step with current settings
+      num_disc_obs_steps=3,  # 52-dim per step with current settings
       asset_name="robot",
       root_body_name="LINK_BASE",
       motion_file=None,
