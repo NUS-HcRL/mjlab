@@ -15,6 +15,10 @@ if TYPE_CHECKING:
 _DEFAULT_ASSET_CFG = SceneEntityCfg("robot")
 
 
+def _body_log_name(body_name: str) -> str:
+  return body_name.removeprefix("LINK_").lower()
+
+
 def illegal_contact(env: ManagerBasedRlEnv, sensor_name: str) -> torch.Tensor:
   sensor: ContactSensor = env.scene[sensor_name]
   assert sensor.data.found is not None
@@ -54,45 +58,116 @@ def bad_body_contact_force(
   body_names: tuple[str, ...],
   body_force_thresholds: dict[str, float],
 ) -> torch.Tensor:
+  return BadBodyContactForce()(env, sensor_name, body_names, body_force_thresholds)
+
+
+class BadBodyContactForce:
   """Terminate when any named body contact-force norm exceeds its threshold.
 
   Every name in ``body_names`` must appear in ``body_force_thresholds``.
   """
-  sensor: ContactSensor = env.scene[sensor_name]
-  assert sensor.data.force is not None
 
-  if not body_names:
-    return torch.zeros(env.num_envs, dtype=torch.bool, device=sensor.data.force.device)
+  def __init__(self) -> None:
+    self._body_trigger_sums: dict[str, torch.Tensor] = {}
+    self._body_force_sums: dict[str, torch.Tensor] = {}
+    self._steps: torch.Tensor | None = None
 
-  missing_thresholds = set(body_names) - set(body_force_thresholds)
-  if missing_thresholds:
-    raise ValueError(
-      "bad_body_contact_force: body_force_thresholds missing entries for "
-      f"{sorted(missing_thresholds)}"
+  def reset(
+    self,
+    env_ids: torch.Tensor | slice | None = None,
+  ) -> dict[str, torch.Tensor]:
+    if self._steps is None:
+      return {}
+    if env_ids is None:
+      env_ids = slice(None)
+    denom = self._steps[env_ids].clamp_min(1.0)
+    extras: dict[str, torch.Tensor] = {}
+    for body_name, value in self._body_trigger_sums.items():
+      log_name = _body_log_name(body_name)
+      extras[f"Metrics/termination_force/{log_name}_trigger_rate"] = (
+        value[env_ids] / denom
+      ).mean()
+    for body_name, value in self._body_force_sums.items():
+      log_name = _body_log_name(body_name)
+      extras[f"Metrics/termination_force/{log_name}_force_mean"] = (
+        value[env_ids] / denom
+      ).mean()
+    self._steps[env_ids] = 0.0
+    for value in self._body_trigger_sums.values():
+      value[env_ids] = 0.0
+    for value in self._body_force_sums.values():
+      value[env_ids] = 0.0
+    return extras
+
+  def _accumulate(
+    self,
+    store: dict[str, torch.Tensor],
+    name: str,
+    value: torch.Tensor,
+  ) -> None:
+    if name not in store:
+      store[name] = torch.zeros_like(value)
+    store[name] += value
+
+  def __call__(
+    self,
+    env: ManagerBasedRlEnv,
+    sensor_name: str,
+    body_names: tuple[str, ...],
+    body_force_thresholds: dict[str, float],
+  ) -> torch.Tensor:
+    sensor: ContactSensor = env.scene[sensor_name]
+    assert sensor.data.force is not None
+
+    if not body_names:
+      return torch.zeros(
+        env.num_envs,
+        dtype=torch.bool,
+        device=sensor.data.force.device,
+      )
+
+    if self._steps is None or self._steps.shape[0] != env.num_envs:
+      self._steps = torch.zeros(env.num_envs, device=sensor.data.force.device)
+      self._body_trigger_sums = {}
+      self._body_force_sums = {}
+
+    missing_thresholds = set(body_names) - set(body_force_thresholds)
+    if missing_thresholds:
+      raise ValueError(
+        "bad_body_contact_force: body_force_thresholds missing entries for "
+        f"{sorted(missing_thresholds)}"
+      )
+
+    slot_body_names = []
+    seen = set()
+    for slot in sensor._slots:
+      if slot.primary_name not in seen:
+        slot_body_names.append(slot.primary_name)
+        seen.add(slot.primary_name)
+
+    body_to_index = {name: i for i, name in enumerate(slot_body_names)}
+    missing_bodies = set(body_names) - set(body_to_index)
+    if missing_bodies:
+      raise ValueError(
+        "bad_body_contact_force: body_names not found on contact sensor "
+        f"{sensor_name!r}: {sorted(missing_bodies)}"
+      )
+
+    terminate = torch.zeros(
+      env.num_envs,
+      dtype=torch.bool,
+      device=sensor.data.force.device,
     )
-
-  slot_body_names = []
-  seen = set()
-  for slot in sensor._slots:
-    if slot.primary_name not in seen:
-      slot_body_names.append(slot.primary_name)
-      seen.add(slot.primary_name)
-
-  body_to_index = {name: i for i, name in enumerate(slot_body_names)}
-  missing_bodies = set(body_names) - set(body_to_index)
-  if missing_bodies:
-    raise ValueError(
-      "bad_body_contact_force: body_names not found on contact sensor "
-      f"{sensor_name!r}: {sorted(missing_bodies)}"
-    )
-
-  terminate = torch.zeros(env.num_envs, dtype=torch.bool, device=sensor.data.force.device)
-  for name in body_names:
-    idx = body_to_index[name]
-    threshold = body_force_thresholds[name]
-    force_norm = torch.norm(sensor.data.force[:, idx], dim=-1)
-    terminate |= force_norm > threshold
-  return terminate
+    self._steps += 1.0
+    for name in body_names:
+      idx = body_to_index[name]
+      threshold = body_force_thresholds[name]
+      force_norm = torch.norm(sensor.data.force[:, idx], dim=-1)
+      body_trigger = force_norm > threshold
+      terminate |= body_trigger
+      self._accumulate(self._body_trigger_sums, name, body_trigger.float())
+      self._accumulate(self._body_force_sums, name, force_norm)
+    return terminate
 
 
 def nonfinite_state(

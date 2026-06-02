@@ -88,13 +88,6 @@ class JointAction(ActionTerm):
   def reset(self, env_ids: torch.Tensor | slice | None = None) -> None:
     self._raw_actions[env_ids] = 0.0
 
-  def override_with_default(self, env_ids: torch.Tensor) -> None:
-    """Use default (offset) as applied action for these envs."""
-    if isinstance(self._offset, torch.Tensor):
-      self._processed_actions[env_ids] = self._offset[env_ids].clone()
-    else:
-      self._processed_actions[env_ids] = self._offset
-
 
 class JointPositionAction(JointAction):
   def __init__(

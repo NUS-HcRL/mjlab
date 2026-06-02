@@ -1,0 +1,1457 @@
+_wandb:
+    value:
+        cli_version: 0.25.1
+        e:
+            m3z7awklqg7ijydqiofwxs2wsdj95pqc:
+                args:
+                    - Mjlab-Falling-Flat-PM1-AMP
+                    - --env.scene.num-envs
+                    - "4096"
+                    - --agent.max_iterations
+                    - "40000"
+                cpu_count: 24
+                cpu_count_logical: 24
+                cudaVersion: "13.0"
+                disk:
+                    /:
+                        total: "2014574526464"
+                        used: "1126638882816"
+                email: 1205492990@qq.com
+                executable: /home/wang/miniconda3/envs/mjlab/bin/python
+                git:
+                    commit: ddd403eefb885537044daf824010f72fc5f2ef00
+                    remote: git@github.com:NUS-HcRL/mjlab.git
+                gpu: NVIDIA GeForce RTX 4090
+                gpu_count: 1
+                gpu_nvidia:
+                    - architecture: Ada
+                      cudaCores: 16384
+                      memoryTotal: "25757220864"
+                      name: NVIDIA GeForce RTX 4090
+                      uuid: GPU-a34c5367-577c-70fe-6a48-cd49ea026112
+                host: z890
+                memory:
+                    total: "67114184704"
+                os: Linux-6.17.0-23-generic-x86_64-with-glibc2.39
+                program: -m mjlab.scripts.train
+                python: CPython 3.13.12
+                root: /home/wang/mjlab
+                startedAt: "2026-05-13T07:01:18.588652Z"
+                writerId: m3z7awklqg7ijydqiofwxs2wsdj95pqc
+        m: []
+        python_version: 3.13.12
+        t:
+            "1":
+                - 1
+            "2":
+                - 1
+            "3":
+                - 3
+                - 13
+                - 17
+                - 61
+            "4": 3.13.12
+            "5": 0.25.1
+            "12": 0.25.1
+            "13": linux-x86_64
+alg_cfg:
+    value:
+        clip_param: 0.2
+        desired_kl: 0.01
+        disc_batch_size_scale: 0.0625
+        disc_epochs: 1
+        disc_eval_batch_size: 0
+        disc_grad_penalty: 10
+        disc_hidden_dims:
+            - 512
+            - 512
+        disc_input_noise_std: 0
+        disc_logit_reg: 0.01
+        disc_lr: 0.0001
+        disc_replay_buffer_size: 200000
+        disc_replay_samples: 1000
+        disc_reward_scale: 2
+        disc_reward_weight: 1
+        entropy_coef: 0
+        gamma: 0.99
+        lam: 0.95
+        learning_rate: 0.0001
+        max_grad_norm: 1
+        normalize_advantage_per_mini_batch: false
+        num_learning_epochs: 5
+        num_mini_batches: 2
+        reward_mix_ema_decay: 0.99
+        reward_mix_mode: ema_balance
+        reward_mix_scale_clip:
+            - 0.25
+            - 4
+        schedule: fixed
+        task_reward_weight: 1
+        use_clipped_value_loss: true
+        value_loss_coef: 1
+env_cfg:
+    value:
+        actions:
+            joint_pos:
+                actuator_names:
+                    - .*
+                asset_name: robot
+                class_type: mjlab.envs.mdp.actions.joint_actions.JointPositionAction
+                clip: null
+                offset: 0
+                preserve_order: false
+                scale:
+                    J00_HIP_PITCH_L: 0.18340699909815972
+                    J01_HIP_ROLL_L: 0.18340699909815972
+                    J02_HIP_YAW_L: 0.49148335351704703
+                    J03_KNEE_PITCH_L: 0.18340699909815972
+                    J04_ANKLE_PITCH_L: 0.49148335351704703
+                    J05_ANKLE_ROLL_L: 0.49148335351704703
+                    J06_HIP_PITCH_R: 0.18340699909815972
+                    J07_HIP_ROLL_R: 0.18340699909815972
+                    J08_HIP_YAW_R: 0.49148335351704703
+                    J09_KNEE_PITCH_R: 0.18340699909815972
+                    J10_ANKLE_PITCH_R: 0.49148335351704703
+                    J11_ANKLE_ROLL_R: 0.49148335351704703
+                    J12_WAIST_YAW: 0.49148335351704703
+                    J13_SHOULDER_PITCH_L: 0.49148335351704703
+                    J14_SHOULDER_ROLL_L: 0.49148335351704703
+                    J15_SHOULDER_YAW_L: 0.49148335351704703
+                    J16_ELBOW_PITCH_L: 0.49148335351704703
+                    J17_ELBOW_YAW_L: 0.49148335351704703
+                    J18_SHOULDER_PITCH_R: 0.49148335351704703
+                    J19_SHOULDER_ROLL_R: 0.49148335351704703
+                    J20_SHOULDER_YAW_R: 0.49148335351704703
+                    J21_ELBOW_PITCH_R: 0.49148335351704703
+                    J22_ELBOW_YAW_R: 0.49148335351704703
+                    J23_HEAD_YAW: 0.49148335351704703
+                use_default_offset: true
+        amp:
+            asset_name: robot
+            disc_body_pos_b_link_names: []
+            global_obs: false
+            include_projected_gravity: false
+            include_root_rot: false
+            include_root_vel: true
+            include_root_xy: false
+            motion_file:
+                - motion_file/pm_fall4:v0/Back_1_converted_50fps.npz
+                - motion_file/pm_fall4:v0/Front_1_converted_50fps.npz
+                - motion_file/pm_fall4:v0/Left_1_converted_50fps.npz
+                - motion_file/pm_fall4:v0/Right_1_converted_50fps.npz
+                - motion_file/pm_fall4:v0/LeftFront_1_converted_50fps.npz
+                - motion_file/pm_fall4:v0/LeftBack_1_converted_50fps.npz
+                - motion_file/pm_fall4:v0/RightFront_1_converted_50fps.npz
+                - motion_file/pm_fall4:v0/RightBack_1_converted_50fps.npz
+            num_disc_obs_steps: 2
+            root_body_name: LINK_BASE
+            root_height_obs: true
+        commands: null
+        curriculum:
+            q25_effort_limit:
+                func: mjlab.tasks.fall.mdp.curriculums.q25_effort_limit_curriculum
+                params:
+                    actuator_indices:
+                        - 2
+                        - 3
+                        - 4
+                        - 5
+                        - 6
+                    asset_cfg:
+                        actuator_ids:
+                            slice_start: null
+                            slice_step: null
+                            slice_stop: null
+                        actuator_names: null
+                        body_ids:
+                            slice_start: null
+                            slice_step: null
+                            slice_stop: null
+                        body_names: null
+                        geom_ids:
+                            slice_start: null
+                            slice_step: null
+                            slice_stop: null
+                        geom_names: null
+                        joint_ids:
+                            slice_start: null
+                            slice_step: null
+                            slice_stop: null
+                        joint_names: null
+                        name: robot
+                        preserve_order: false
+                        site_ids:
+                            slice_start: null
+                            slice_step: null
+                            slice_stop: null
+                        site_names: null
+                    effort_stages:
+                        - effort_limit: 52
+                          step: 0
+                        - effort_limit: 36.4
+                          step: 960000
+            reset_force_pulse:
+                func: mjlab.tasks.fall.mdp.curriculums.reset_force_pulse_curriculum
+                params:
+                    event_name: push_force_pulse
+                    pulse_stages:
+                        - duration_steps_range:
+                            - 0
+                            - 3
+                          force_axis_range:
+                            x:
+                                - -30
+                                - 30
+                            "y":
+                                - -30
+                                - 30
+                            z:
+                                - -10
+                                - -10
+                          step: 0
+                        - duration_steps_range:
+                            - 2
+                            - 8
+                          force_axis_range:
+                            x:
+                                - -80
+                                - 80
+                            "y":
+                                - -80
+                                - 80
+                            z:
+                                - -10
+                                - -10
+                          step: 128000
+                        - duration_steps_range:
+                            - 4
+                            - 15
+                          force_axis_range:
+                            x:
+                                - -180
+                                - 180
+                            "y":
+                                - -180
+                                - 180
+                            z:
+                                - -10
+                                - -10
+                          step: 320000
+                        - duration_steps_range:
+                            - 5
+                            - 20
+                          force_axis_range:
+                            x:
+                                - -240
+                                - 240
+                            "y":
+                                - -240
+                                - 240
+                            z:
+                                - -30
+                                - -30
+                          step: 480000
+            reset_init:
+                func: mjlab.tasks.fall.mdp.curriculums.reset_initialization_curriculum
+                params:
+                    event_name: reset_base
+                    init_stages:
+                        - data_probability: 0.05
+                          step: 0
+                          tilt_joint_position_range:
+                            - -0.1
+                            - 0.1
+                          tilt_joint_velocity_range:
+                            - -0.03
+                            - 0.03
+                          tilt_pose_range:
+                            pitch:
+                                - -0.1
+                                - 0.1
+                            roll:
+                                - -0.1
+                                - 0.1
+                            x:
+                                - -0.4
+                                - 0.4
+                            "y":
+                                - -0.4
+                                - 0.4
+                            yaw:
+                                - -3.14
+                                - 3.14
+                            z:
+                                - 0
+                                - 0.06
+                          tilt_velocity_range: {}
+                        - data_probability: 0.1
+                          step: 192000
+                          tilt_joint_position_range:
+                            - -0.15
+                            - 0.15
+                          tilt_joint_velocity_range:
+                            - -0.05
+                            - 0.05
+                          tilt_pose_range:
+                            pitch:
+                                - -0.15
+                                - 0.15
+                            roll:
+                                - -0.15
+                                - 0.15
+                            x:
+                                - -0.6
+                                - 0.6
+                            "y":
+                                - -0.6
+                                - 0.6
+                            yaw:
+                                - -3.14
+                                - 3.14
+                            z:
+                                - 0
+                                - 0.1
+                          tilt_velocity_range: {}
+                        - data_probability: 0.25
+                          step: 480000
+                          tilt_joint_position_range:
+                            - -0.25
+                            - 0.25
+                          tilt_joint_velocity_range:
+                            - -0.08
+                            - 0.08
+                          tilt_pose_range:
+                            pitch:
+                                - -0.2
+                                - 0.2
+                            roll:
+                                - -0.2
+                                - 0.2
+                            x:
+                                - -1
+                                - 1
+                            "y":
+                                - -1
+                                - 1
+                            yaw:
+                                - -3.14
+                                - 3.14
+                            z:
+                                - 0
+                                - 0.1
+                          tilt_velocity_range: {}
+        decimation: 4
+        episode_length_s: 6
+        events:
+            foot_friction:
+                domain_randomization: true
+                func: mjlab.envs.mdp.events.randomize_field
+                interval_range_s: null
+                is_global_time: false
+                min_step_count_between_reset: 0
+                mode: startup
+                params:
+                    asset_cfg:
+                        actuator_ids:
+                            slice_start: null
+                            slice_step: null
+                            slice_stop: null
+                        actuator_names: null
+                        body_ids:
+                            slice_start: null
+                            slice_step: null
+                            slice_stop: null
+                        body_names: null
+                        geom_ids:
+                            - 13
+                            - 14
+                            - 26
+                            - 27
+                        geom_names:
+                            - ^collision_(left|right)_foot(_toe)?$
+                        joint_ids:
+                            slice_start: null
+                            slice_step: null
+                            slice_stop: null
+                        joint_names: null
+                        name: robot
+                        preserve_order: false
+                        site_ids:
+                            slice_start: null
+                            slice_step: null
+                            slice_stop: null
+                        site_names: null
+                    field: geom_friction
+                    operation: abs
+                    ranges:
+                        - 0.3
+                        - 1.2
+            push_at_reset:
+                domain_randomization: false
+                func: mjlab.tasks.fall.mdp.events.push_by_setting_velocity_preserve_data
+                interval_range_s: null
+                is_global_time: false
+                min_step_count_between_reset: 0
+                mode: reset
+                params:
+                    preserve_data_reset_states: true
+                    velocity_range:
+                        pitch:
+                            - -0.5
+                            - 0.5
+                        roll:
+                            - -0.5
+                            - 0.5
+                        x:
+                            - -1
+                            - 1
+                        "y":
+                            - -1
+                            - 1
+                        yaw:
+                            - -0.5
+                            - 0.5
+                        z:
+                            - -0.3
+                            - 0.3
+            push_force_pulse:
+                domain_randomization: false
+                func: mjlab.tasks.fall.mdp.events.apply_external_force_torque_axiswise_pulse
+                interval_range_s:
+                    - 0
+                    - 0
+                is_global_time: false
+                min_step_count_between_reset: 0
+                mode: interval
+                params:
+                    asset_cfg:
+                        actuator_ids:
+                            slice_start: null
+                            slice_step: null
+                            slice_stop: null
+                        actuator_names: null
+                        body_ids:
+                            - 15
+                        body_names:
+                            - LINK_TORSO_YAW
+                        geom_ids:
+                            slice_start: null
+                            slice_step: null
+                            slice_stop: null
+                        geom_names: null
+                        joint_ids:
+                            slice_start: null
+                            slice_step: null
+                            slice_stop: null
+                        joint_names: null
+                        name: robot
+                        preserve_order: false
+                        site_ids:
+                            slice_start: null
+                            slice_step: null
+                            slice_stop: null
+                        site_names: null
+                    cooldown_steps: 200
+                    duration_steps: 1
+                    duration_steps_range:
+                        - 0
+                        - 1
+                    force_axis_range:
+                        x:
+                            - -30
+                            - 30
+                        "y":
+                            - -30
+                            - 30
+                        z:
+                            - -10
+                            - -10
+                    preserve_data_reset_states: true
+            push_robot:
+                domain_randomization: false
+                func: mjlab.envs.mdp.events.push_by_setting_velocity
+                interval_range_s:
+                    - 1
+                    - 2
+                is_global_time: false
+                min_step_count_between_reset: 0
+                mode: interval
+                params:
+                    velocity_range:
+                        pitch:
+                            - -0.3
+                            - 0.3
+                        roll:
+                            - -0.3
+                            - 0.3
+                        x:
+                            - -0.5
+                            - 0.5
+                        "y":
+                            - -0.5
+                            - 0.5
+                        yaw:
+                            - -0.4
+                            - 0.4
+                        z:
+                            - -0.2
+                            - 0.2
+            reset_base:
+                domain_randomization: false
+                func: mjlab.tasks.fall.mdp.events.reset_root_state_mixed
+                interval_range_s: null
+                is_global_time: false
+                min_step_count_between_reset: 0
+                mode: reset
+                params:
+                    data_joint_position_range:
+                        - -0.25
+                        - 0.25
+                    data_joint_velocity_range:
+                        - -0.2
+                        - 0.2
+                    data_pose_range:
+                        pitch:
+                            - -0.2
+                            - 0.2
+                        roll:
+                            - -0.2
+                            - 0.2
+                        x:
+                            - -1
+                            - 1
+                        "y":
+                            - -1
+                            - 1
+                        yaw:
+                            - -3.14
+                            - 3.14
+                        z:
+                            - -0.03
+                            - 0.3
+                    data_probability: 0.05
+                    data_root_body_name: LINK_BASE
+                    data_velocity_range:
+                        pitch:
+                            - -0.6
+                            - 0.6
+                        roll:
+                            - -0.6
+                            - 0.6
+                        x:
+                            - -1
+                            - 1
+                        "y":
+                            - -1
+                            - 1
+                        yaw:
+                            - -0.8
+                            - 0.8
+                        z:
+                            - -0.4
+                            - 0.4
+                    motion_files:
+                        - data/amp_pm1_fall/policy_switch_walking_combined.csv
+                    tilt_joint_position_range:
+                        - -0.1
+                        - 0.1
+                    tilt_joint_velocity_range:
+                        - -0.03
+                        - 0.03
+                    tilt_pose_range:
+                        pitch:
+                            - -0.1
+                            - 0.1
+                        roll:
+                            - -0.1
+                            - 0.1
+                        x:
+                            - -0.4
+                            - 0.4
+                        "y":
+                            - -0.4
+                            - 0.4
+                        yaw:
+                            - -3.14
+                            - 3.14
+                        z:
+                            - 0
+                            - 0.06
+        is_finite_horizon: false
+        observations:
+            critic:
+                concatenate_dim: -1
+                concatenate_terms: true
+                enable_corruption: false
+                flatten_history_dim: true
+                history_length: null
+                terms:
+                    actions:
+                        clip: null
+                        delay_hold_prob: 0
+                        delay_max_lag: 0
+                        delay_min_lag: 0
+                        delay_per_env: true
+                        delay_per_env_phase: true
+                        delay_update_period: 0
+                        flatten_history_dim: true
+                        func: mjlab.envs.mdp.observations.last_action
+                        history_length: 5
+                        noise: null
+                        scale: null
+                    base_ang_vel:
+                        clip: null
+                        delay_hold_prob: 0
+                        delay_max_lag: 0
+                        delay_min_lag: 0
+                        delay_per_env: true
+                        delay_per_env_phase: true
+                        delay_update_period: 0
+                        flatten_history_dim: true
+                        func: mjlab.envs.mdp.observations.builtin_sensor
+                        history_length: 5
+                        noise: null
+                        params:
+                            sensor_name: robot/imu_angular_velocity
+                        scale: null
+                    base_lin_vel:
+                        clip: null
+                        delay_hold_prob: 0
+                        delay_max_lag: 0
+                        delay_min_lag: 0
+                        delay_per_env: true
+                        delay_per_env_phase: true
+                        delay_update_period: 0
+                        flatten_history_dim: true
+                        func: mjlab.envs.mdp.observations.builtin_sensor
+                        history_length: 5
+                        noise: null
+                        params:
+                            sensor_name: robot/imu_link_linear_velocity
+                        scale: null
+                    base_pos:
+                        clip: null
+                        delay_hold_prob: 0
+                        delay_max_lag: 0
+                        delay_min_lag: 0
+                        delay_per_env: true
+                        delay_per_env_phase: true
+                        delay_update_period: 0
+                        flatten_history_dim: true
+                        func: mjlab.tasks.fall.mdp.observations.base_pos_rel
+                        history_length: 5
+                        noise: null
+                        params:
+                            asset_cfg:
+                                actuator_ids:
+                                    slice_start: null
+                                    slice_step: null
+                                    slice_stop: null
+                                actuator_names: null
+                                body_ids:
+                                    slice_start: null
+                                    slice_step: null
+                                    slice_stop: null
+                                body_names: null
+                                geom_ids:
+                                    slice_start: null
+                                    slice_step: null
+                                    slice_stop: null
+                                geom_names: null
+                                joint_ids:
+                                    slice_start: null
+                                    slice_step: null
+                                    slice_stop: null
+                                joint_names: null
+                                name: robot
+                                preserve_order: false
+                                site_ids:
+                                    slice_start: null
+                                    slice_step: null
+                                    slice_stop: null
+                                site_names: null
+                        scale: null
+                    joint_pos:
+                        clip: null
+                        delay_hold_prob: 0
+                        delay_max_lag: 0
+                        delay_min_lag: 0
+                        delay_per_env: true
+                        delay_per_env_phase: true
+                        delay_update_period: 0
+                        flatten_history_dim: true
+                        func: mjlab.envs.mdp.observations.joint_pos_rel
+                        history_length: 5
+                        noise: null
+                        scale: null
+                    joint_vel:
+                        clip: null
+                        delay_hold_prob: 0
+                        delay_max_lag: 0
+                        delay_min_lag: 0
+                        delay_per_env: true
+                        delay_per_env_phase: true
+                        delay_update_period: 0
+                        flatten_history_dim: true
+                        func: mjlab.envs.mdp.observations.joint_vel_rel
+                        history_length: 5
+                        noise: null
+                        scale: null
+                    projected_gravity:
+                        clip: null
+                        delay_hold_prob: 0
+                        delay_max_lag: 0
+                        delay_min_lag: 0
+                        delay_per_env: true
+                        delay_per_env_phase: true
+                        delay_update_period: 0
+                        flatten_history_dim: true
+                        func: mjlab.envs.mdp.observations.projected_gravity
+                        history_length: 5
+                        noise: null
+                        scale: null
+            policy:
+                concatenate_dim: -1
+                concatenate_terms: true
+                enable_corruption: true
+                flatten_history_dim: true
+                history_length: null
+                terms:
+                    actions:
+                        clip: null
+                        delay_hold_prob: 0
+                        delay_max_lag: 0
+                        delay_min_lag: 0
+                        delay_per_env: true
+                        delay_per_env_phase: true
+                        delay_update_period: 0
+                        flatten_history_dim: true
+                        func: mjlab.envs.mdp.observations.last_action
+                        history_length: 5
+                        noise: null
+                        scale: null
+                    base_ang_vel:
+                        clip: null
+                        delay_hold_prob: 0
+                        delay_max_lag: 0
+                        delay_min_lag: 0
+                        delay_per_env: true
+                        delay_per_env_phase: true
+                        delay_update_period: 0
+                        flatten_history_dim: true
+                        func: mjlab.envs.mdp.observations.builtin_sensor
+                        history_length: 5
+                        noise:
+                            n_max: 0.2
+                            n_min: -0.2
+                            operation: add
+                        params:
+                            sensor_name: robot/imu_angular_velocity
+                        scale: null
+                    joint_pos:
+                        clip: null
+                        delay_hold_prob: 0
+                        delay_max_lag: 0
+                        delay_min_lag: 0
+                        delay_per_env: true
+                        delay_per_env_phase: true
+                        delay_update_period: 0
+                        flatten_history_dim: true
+                        func: mjlab.envs.mdp.observations.joint_pos_rel
+                        history_length: 5
+                        noise:
+                            n_max: 0.01
+                            n_min: -0.01
+                            operation: add
+                        scale: null
+                    joint_vel:
+                        clip: null
+                        delay_hold_prob: 0
+                        delay_max_lag: 0
+                        delay_min_lag: 0
+                        delay_per_env: true
+                        delay_per_env_phase: true
+                        delay_update_period: 0
+                        flatten_history_dim: true
+                        func: mjlab.envs.mdp.observations.joint_vel_rel
+                        history_length: 5
+                        noise:
+                            n_max: 1.5
+                            n_min: -1.5
+                            operation: add
+                        scale: null
+                    projected_gravity:
+                        clip: null
+                        delay_hold_prob: 0
+                        delay_max_lag: 0
+                        delay_min_lag: 0
+                        delay_per_env: true
+                        delay_per_env_phase: true
+                        delay_update_period: 0
+                        flatten_history_dim: true
+                        func: mjlab.envs.mdp.observations.projected_gravity
+                        history_length: 5
+                        noise:
+                            n_max: 0.05
+                            n_min: -0.05
+                            operation: add
+                        scale: null
+        rewards:
+            action_rate_l2:
+                func: mjlab.envs.mdp.rewards.action_rate_l2
+                weight: -0.5
+            control_descent_speed:
+                func: mjlab.tasks.fall.mdp.rewards.control_descent_speed
+                params:
+                    threshold: 0.5
+                    torso_body_name: LINK_TORSO_YAW
+                weight: 1
+            dof_pos_limits:
+                func: mjlab.envs.mdp.rewards.joint_pos_limits
+                weight: -1
+            impact_velocity_reward:
+                func: <mjlab.tasks.fall.mdp.rewards.ImpactVelocityReward object at 0x7eb90ddad550>
+                weight: 1
+            lower_then_upper_contact:
+                func: <mjlab.tasks.fall.mdp.rewards.LowerBodyThenUpperBodyContactReward object at 0x7eb90ddad450>
+                weight: 1
+            reduce_contact_force:
+                func: mjlab.tasks.fall.mdp.rewards.reduce_contact_force_weighted
+                params:
+                    alpha: 0.3
+                    high_weight: 50
+                    high_weight_bodies:
+                        - LINK_ELBOW_END_L
+                        - LINK_ELBOW_END_R
+                        - LINK_HEAD_YAW
+                        - LINK_TORSO_YAW
+                    low_weight: 0.5
+                    medium_weight: 2
+                    medium_weight_bodies:
+                        - LINK_ELBOW_PITCH_L
+                        - LINK_ELBOW_PITCH_R
+                        - LINK_ELBOW_YAW_L
+                        - LINK_ELBOW_YAW_R
+                    sensor_name: body_contact_force
+                    shoulder_weight: 20
+                    shoulder_weight_bodies:
+                        - LINK_SHOULDER_ROLL_L
+                        - LINK_SHOULDER_ROLL_R
+                        - LINK_SHOULDER_YAW_L
+                        - LINK_SHOULDER_YAW_R
+                    squash_scale: 0.02
+                weight: 0.015
+            self_collisions:
+                func: mjlab.tasks.fall.mdp.rewards.self_collision_cost
+                params:
+                    sensor_name: self_collision
+                weight: -10
+        scene:
+            entities:
+                robot:
+                    articulation:
+                        actuators:
+                            - armature: 0.0453
+                              damping: 11.385131776284
+                              effort_limit: 131.2
+                              frictionloss: 0
+                              joint_names_expr:
+                                - J00_HIP_PITCH_L
+                                - J06_HIP_PITCH_R
+                                - J03_KNEE_PITCH_L
+                                - J09_KNEE_PITCH_R
+                              stiffness: 178.8372317375161
+                            - armature: 0.0453
+                              damping: 11.385131776284
+                              effort_limit: 131.2
+                              frictionloss: 0
+                              joint_names_expr:
+                                - J01_HIP_ROLL_L
+                                - J07_HIP_ROLL_R
+                              stiffness: 178.8372317375161
+                            - armature: 0.0067
+                              damping: 1.6838936622760001
+                              effort_limit: 52
+                              frictionloss: 0
+                              joint_names_expr:
+                                - J02_HIP_YAW_L
+                                - J08_HIP_YAW_R
+                              stiffness: 26.45053979340746
+                            - armature: 0.0067
+                              damping: 0.5
+                              effort_limit: 52
+                              frictionloss: 0
+                              joint_names_expr:
+                                - J04_ANKLE_PITCH_L
+                                - J05_ANKLE_ROLL_L
+                                - J10_ANKLE_PITCH_R
+                                - J11_ANKLE_ROLL_R
+                              stiffness: 26.45053979340746
+                            - armature: 0.0067
+                              damping: 1.6838936622760001
+                              effort_limit: 52
+                              frictionloss: 0
+                              joint_names_expr:
+                                - J12_WAIST_YAW
+                              stiffness: 26.45053979340746
+                            - armature: 0.0067
+                              damping: 1.6838936622760001
+                              effort_limit: 52
+                              frictionloss: 0
+                              joint_names_expr:
+                                - J13_SHOULDER_PITCH_L
+                                - J14_SHOULDER_ROLL_L
+                                - J15_SHOULDER_YAW_L
+                                - J16_ELBOW_PITCH_L
+                                - J17_ELBOW_YAW_L
+                                - J18_SHOULDER_PITCH_R
+                                - J19_SHOULDER_ROLL_R
+                                - J20_SHOULDER_YAW_R
+                                - J21_ELBOW_PITCH_R
+                                - J22_ELBOW_YAW_R
+                              stiffness: 26.45053979340746
+                            - armature: 0.0067
+                              damping: 1.6838936622760001
+                              effort_limit: 52
+                              frictionloss: 0
+                              joint_names_expr:
+                                - J23_HEAD_YAW
+                              stiffness: 26.45053979340746
+                        soft_joint_pos_limit_factor: 0.9
+                    cameras: []
+                    collisions:
+                        - conaffinity: 1
+                          condim:
+                            ^collision_left_foot$: 3
+                            ^collision_left_foot_toe$: 3
+                            ^collision_right_foot$: 3
+                            ^collision_right_foot_toe$: 3
+                          contype: 1
+                          disable_other_geoms: false
+                          friction:
+                            ^collision_left_foot$:
+                                - 0.6
+                            ^collision_left_foot_toe$:
+                                - 0.6
+                            ^collision_right_foot$:
+                                - 0.6
+                            ^collision_right_foot_toe$:
+                                - 0.6
+                          geom_names_expr:
+                            - ^collision_
+                          priority:
+                            ^collision_left_foot$: 1
+                            ^collision_left_foot_toe$: 1
+                            ^collision_right_foot$: 1
+                            ^collision_right_foot_toe$: 1
+                          solimp:
+                            ^collision_base_lower$:
+                                - 0.9
+                                - 0.95
+                                - 0.001
+                            ^collision_head1$:
+                                - 0.9
+                                - 0.95
+                                - 0.001
+                            ^collision_left_elbow_capsule$:
+                                - 0.9
+                                - 0.95
+                                - 0.001
+                            ^collision_left_elbow_end$:
+                                - 0.9
+                                - 0.95
+                                - 0.001
+                            ^collision_left_elbow_pitch$:
+                                - 0.9
+                                - 0.95
+                                - 0.001
+                            ^collision_left_elbow_yaw$:
+                                - 0.9
+                                - 0.95
+                                - 0.001
+                            ^collision_left_foot$:
+                                - 0.9
+                                - 0.95
+                                - 0.023
+                            ^collision_left_foot_toe$:
+                                - 0.9
+                                - 0.95
+                                - 0.023
+                            ^collision_left_hip$:
+                                - 0.9
+                                - 0.95
+                                - 0.001
+                            ^collision_left_hip_roll$:
+                                - 0.9
+                                - 0.95
+                                - 0.001
+                            ^collision_left_hip_yaw$:
+                                - 0.9
+                                - 0.95
+                                - 0.001
+                            ^collision_left_knee_pitch$:
+                                - 0.9
+                                - 0.95
+                                - 0.001
+                            ^collision_left_knee1$:
+                                - 0.9
+                                - 0.95
+                                - 0.001
+                            ^collision_left_shoulder_roll$:
+                                - 0.9
+                                - 0.95
+                                - 0.001
+                            ^collision_left_shoulder_roll1$:
+                                - 0.9
+                                - 0.95
+                                - 0.001
+                            ^collision_left_shoulder_yaw$:
+                                - 0.9
+                                - 0.95
+                                - 0.001
+                            ^collision_right_elbow_capsule$:
+                                - 0.9
+                                - 0.95
+                                - 0.001
+                            ^collision_right_elbow_end$:
+                                - 0.9
+                                - 0.95
+                                - 0.001
+                            ^collision_right_elbow_pitch$:
+                                - 0.9
+                                - 0.95
+                                - 0.001
+                            ^collision_right_elbow_yaw$:
+                                - 0.9
+                                - 0.95
+                                - 0.001
+                            ^collision_right_foot$:
+                                - 0.9
+                                - 0.95
+                                - 0.023
+                            ^collision_right_foot_toe$:
+                                - 0.9
+                                - 0.95
+                                - 0.023
+                            ^collision_right_hip$:
+                                - 0.9
+                                - 0.95
+                                - 0.001
+                            ^collision_right_hip_roll$:
+                                - 0.9
+                                - 0.95
+                                - 0.001
+                            ^collision_right_hip_yaw$:
+                                - 0.9
+                                - 0.95
+                                - 0.001
+                            ^collision_right_knee_pitch$:
+                                - 0.9
+                                - 0.95
+                                - 0.001
+                            ^collision_right_knee1$:
+                                - 0.9
+                                - 0.95
+                                - 0.001
+                            ^collision_right_shoulder_roll$:
+                                - 0.9
+                                - 0.95
+                                - 0.001
+                            ^collision_right_shoulder_roll1$:
+                                - 0.9
+                                - 0.95
+                                - 0.001
+                            ^collision_right_shoulder_yaw$:
+                                - 0.9
+                                - 0.95
+                                - 0.001
+                            ^collision_torso_upper$:
+                                - 0.9
+                                - 0.95
+                                - 0.001
+                          solref:
+                            ^collision_base_lower$:
+                                - 0.02
+                                - 1
+                            ^collision_head1$:
+                                - 0.02
+                                - 1
+                            ^collision_left_elbow_capsule$:
+                                - 0.02
+                                - 1
+                            ^collision_left_elbow_end$:
+                                - 0.02
+                                - 1
+                            ^collision_left_elbow_pitch$:
+                                - 0.02
+                                - 1
+                            ^collision_left_elbow_yaw$:
+                                - 0.02
+                                - 1
+                            ^collision_left_foot$:
+                                - 0.0005
+                                - 1
+                            ^collision_left_foot_toe$:
+                                - 0.0005
+                                - 1
+                            ^collision_left_hip$:
+                                - 0.02
+                                - 1
+                            ^collision_left_hip_roll$:
+                                - 0.02
+                                - 1
+                            ^collision_left_hip_yaw$:
+                                - 0.02
+                                - 1
+                            ^collision_left_knee_pitch$:
+                                - 0.02
+                                - 1
+                            ^collision_left_knee1$:
+                                - 0.02
+                                - 1
+                            ^collision_left_shoulder_roll$:
+                                - 0.02
+                                - 1
+                            ^collision_left_shoulder_roll1$:
+                                - 0.02
+                                - 1
+                            ^collision_left_shoulder_yaw$:
+                                - 0.02
+                                - 1
+                            ^collision_right_elbow_capsule$:
+                                - 0.02
+                                - 1
+                            ^collision_right_elbow_end$:
+                                - 0.02
+                                - 1
+                            ^collision_right_elbow_pitch$:
+                                - 0.02
+                                - 1
+                            ^collision_right_elbow_yaw$:
+                                - 0.02
+                                - 1
+                            ^collision_right_foot$:
+                                - 0.0005
+                                - 1
+                            ^collision_right_foot_toe$:
+                                - 0.0005
+                                - 1
+                            ^collision_right_hip$:
+                                - 0.02
+                                - 1
+                            ^collision_right_hip_roll$:
+                                - 0.02
+                                - 1
+                            ^collision_right_hip_yaw$:
+                                - 0.02
+                                - 1
+                            ^collision_right_knee_pitch$:
+                                - 0.02
+                                - 1
+                            ^collision_right_knee1$:
+                                - 0.02
+                                - 1
+                            ^collision_right_shoulder_roll$:
+                                - 0.02
+                                - 1
+                            ^collision_right_shoulder_roll1$:
+                                - 0.02
+                                - 1
+                            ^collision_right_shoulder_yaw$:
+                                - 0.02
+                                - 1
+                            ^collision_torso_upper$:
+                                - 0.02
+                                - 1
+                    debug_vis: false
+                    init_state:
+                        ang_vel:
+                            - 0
+                            - 0
+                            - 0
+                        joint_pos:
+                            J00_HIP_PITCH_L: -0.06
+                            J01_HIP_ROLL_L: 0
+                            J02_HIP_YAW_L: 0
+                            J03_KNEE_PITCH_L: 0.12
+                            J04_ANKLE_PITCH_L: -0.06
+                            J05_ANKLE_ROLL_L: 0
+                            J06_HIP_PITCH_R: -0.06
+                            J07_HIP_ROLL_R: 0
+                            J08_HIP_YAW_R: 0
+                            J09_KNEE_PITCH_R: 0.12
+                            J10_ANKLE_PITCH_R: -0.06
+                            J11_ANKLE_ROLL_R: 0
+                            J12_WAIST_YAW: 0
+                            J13_SHOULDER_PITCH_L: 0
+                            J14_SHOULDER_ROLL_L: 0.15
+                            J15_SHOULDER_YAW_L: 0
+                            J16_ELBOW_PITCH_L: -0.25
+                            J17_ELBOW_YAW_L: 0
+                            J18_SHOULDER_PITCH_R: 0
+                            J19_SHOULDER_ROLL_R: -0.15
+                            J20_SHOULDER_YAW_R: 0
+                            J21_ELBOW_PITCH_R: -0.25
+                            J22_ELBOW_YAW_R: 0
+                            J23_HEAD_YAW: 0
+                        joint_vel:
+                            .*: 0
+                        lin_vel:
+                            - 0
+                            - 0
+                            - 0
+                        pos:
+                            - 0
+                            - 0
+                            - 0.82
+                        rot:
+                            - 1
+                            - 0
+                            - 0
+                            - 0
+                    lights: []
+                    materials: []
+                    spec_fn: mjlab.asset_zoo.robots.engineai_pm01.pm01_8.get_spec
+                    textures: []
+            env_spacing: 2
+            extent: 2
+            num_envs: 4096
+            sensors:
+                - debug: false
+                  fields:
+                    - found
+                  global_frame: false
+                  name: self_collision
+                  num_slots: 1
+                  primary:
+                    entity: robot
+                    exclude: []
+                    mode: subtree
+                    pattern: LINK_BASE
+                  reduce: none
+                  secondary:
+                    entity: robot
+                    exclude: []
+                    mode: subtree
+                    pattern: LINK_BASE
+                  secondary_policy: first
+                  track_air_time: false
+                - debug: false
+                  fields:
+                    - force
+                    - found
+                  global_frame: false
+                  name: body_contact_force
+                  num_slots: 1
+                  primary:
+                    entity: robot
+                    exclude:
+                        - LINK_ANKLE_PITCH_L
+                        - LINK_ANKLE_PITCH_R
+                        - LINK_ANKLE_ROLL_L
+                        - LINK_ANKLE_ROLL_R
+                    mode: body
+                    pattern: ^LINK_.*$
+                  reduce: maxforce
+                  secondary:
+                    entity: null
+                    exclude: []
+                    mode: body
+                    pattern: terrain
+                  secondary_policy: first
+                  track_air_time: true
+            spec_fn: null
+            terrain:
+                env_spacing: 2
+                max_init_terrain_level: null
+                num_envs: 4096
+                terrain_generator: null
+                terrain_type: plane
+        seed: 42
+        sim:
+            contact_sensor_maxmatch: 200
+            ls_parallel: true
+            mujoco:
+                ccd_iterations: 200
+                ccd_tolerance: null
+                cone: pyramidal
+                gravity:
+                    - 0
+                    - 0
+                    - -9.81
+                impratio: 1
+                integrator: implicitfast
+                iterations: 6
+                jacobian: auto
+                ls_iterations: 12
+                ls_tolerance: 0.01
+                solver: newton
+                timestep: 0.005
+                tolerance: 1e-08
+            nan_guard:
+                buffer_size: 100
+                enabled: false
+                max_envs_to_dump: 5
+                output_dir: /tmp/mjlab/nan_dumps
+            nconmax: 35
+            njmax: 1600
+        terminations:
+            forbidden_body_contact_force:
+                func: mjlab.tasks.fall.mdp.terminations.bad_body_contact_force
+                params:
+                    body_names:
+                        - LINK_HEAD_YAW
+                        - LINK_TORSO_YAW
+                        - LINK_ELBOW_END_L
+                        - LINK_ELBOW_END_R
+                    force_threshold: 500
+                    sensor_name: body_contact_force
+                time_out: false
+            nonfinite_state:
+                func: mjlab.tasks.fall.mdp.terminations.nonfinite_state
+                params:
+                    asset_cfg:
+                        actuator_ids:
+                            slice_start: null
+                            slice_step: null
+                            slice_stop: null
+                        actuator_names: null
+                        body_ids:
+                            slice_start: null
+                            slice_step: null
+                            slice_stop: null
+                        body_names: null
+                        geom_ids:
+                            slice_start: null
+                            slice_step: null
+                            slice_stop: null
+                        geom_names: null
+                        joint_ids:
+                            slice_start: null
+                            slice_step: null
+                            slice_stop: null
+                        joint_names: null
+                        name: robot
+                        preserve_order: false
+                        site_ids:
+                            slice_start: null
+                            slice_step: null
+                            slice_stop: null
+                        site_names: null
+                time_out: false
+            time_out:
+                func: mjlab.envs.mdp.terminations.time_out
+                time_out: true
+        viewer:
+            asset_name: robot
+            azimuth: 90
+            body_name: LINK_TORSO_YAW
+            distance: 3
+            elevation: -5
+            enable_reflections: true
+            enable_shadows: true
+            env_idx: 0
+            height: 240
+            lookat:
+                - 0
+                - 0
+                - 0
+            origin_type: ASSET_BODY
+            width: 320
+log_dir:
+    value: logs/rsl_rl/pm1_falling_amp/2026-05-13_15-01-10
+policy_cfg:
+    value:
+        activation: elu
+        actor_hidden_dims:
+            - 512
+            - 256
+            - 128
+        actor_obs_normalization: true
+        critic_hidden_dims:
+            - 512
+            - 256
+            - 128
+        critic_obs_normalization: true
+        init_noise_std: 0.05
+        noise_std_type: log
+runner_cfg:
+    value:
+        algorithm:
+            clip_param: 0.2
+            desired_kl: 0.01
+            disc_batch_size_scale: 0.0625
+            disc_epochs: 1
+            disc_eval_batch_size: 0
+            disc_grad_penalty: 10
+            disc_hidden_dims:
+                - 512
+                - 512
+            disc_input_noise_std: 0
+            disc_logit_reg: 0.01
+            disc_lr: 0.0001
+            disc_replay_buffer_size: 200000
+            disc_replay_samples: 1000
+            disc_reward_scale: 2
+            disc_reward_weight: 1
+            entropy_coef: 0
+            gamma: 0.99
+            lam: 0.95
+            learning_rate: 0.0001
+            max_grad_norm: 1
+            normalize_advantage_per_mini_batch: false
+            num_learning_epochs: 5
+            num_mini_batches: 2
+            reward_mix_ema_decay: 0.99
+            reward_mix_mode: ema_balance
+            reward_mix_scale_clip:
+                - 0.25
+                - 4
+            schedule: fixed
+            task_reward_weight: 1
+            use_clipped_value_loss: true
+            value_loss_coef: 1
+        class_name: OnPolicyRunner
+        clip_actions: null
+        discriminator:
+            empirical_normalization: true
+            hidden_dims:
+                - 512
+                - 512
+            loss_type: BCEWithLogits
+            reward_scale: 2
+        experiment_name: pm1_falling_amp
+        load_checkpoint: model_.*.pt
+        load_run: .*
+        logger: wandb
+        max_iterations: 40000
+        num_steps_per_env: 30
+        obs_groups:
+            critic:
+                - critic
+            policy:
+                - policy
+        policy:
+            activation: elu
+            actor_hidden_dims:
+                - 512
+                - 256
+                - 128
+            actor_obs_normalization: true
+            critic_hidden_dims:
+                - 512
+                - 256
+                - 128
+            critic_obs_normalization: true
+            init_noise_std: 0.05
+            noise_std_type: log
+        resume: false
+        run_name: ""
+        save_interval: 5000
+        seed: 42
+        wandb_kwargs:
+            entity: e1519767-national-university-of-singapore
+            group: pm1_falling_amp
+            notes: ""
+            project: mjlab
+        wandb_project: mjlab

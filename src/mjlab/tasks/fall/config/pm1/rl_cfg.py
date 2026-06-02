@@ -43,7 +43,7 @@ def pm1_falling_amp_runner_cfg() -> RslRlOnPolicyRunnerCfg:
   """Create RL runner configuration for PM1 falling task with AMP (MimicKit-style for speed)."""
   return RslRlOnPolicyRunnerCfg(
     policy=RslRlPpoActorCriticCfg(
-      init_noise_std=0.05,
+      init_noise_std=0.1,
       noise_std_type="log",
       actor_obs_normalization=True,
       critic_obs_normalization=True,
@@ -55,7 +55,7 @@ def pm1_falling_amp_runner_cfg() -> RslRlOnPolicyRunnerCfg:
       value_loss_coef=1.0,
       use_clipped_value_loss=True,
       clip_param=0.2,
-      entropy_coef=0.0,
+      entropy_coef=0.001,
       num_learning_epochs=5,
       num_mini_batches=2,
       learning_rate=1e-4,
@@ -68,7 +68,7 @@ def pm1_falling_amp_runner_cfg() -> RslRlOnPolicyRunnerCfg:
       disc_reward_weight=1.0,
       reward_mix_mode="ema_balance",
       reward_mix_ema_decay=0.99,
-      reward_mix_scale_clip=(0.25, 4.0),
+      reward_mix_scale_clip=(0.10, 4.0),
       disc_reward_scale=2.0,
       disc_epochs=1,
       disc_batch_size_scale=2.0 / 32.0,
@@ -77,12 +77,11 @@ def pm1_falling_amp_runner_cfg() -> RslRlOnPolicyRunnerCfg:
       disc_lr=1.0e-4,
       disc_grad_penalty=10.0,
       disc_logit_reg=0.01,
-      disc_input_noise_std=0.0,
+      disc_input_noise_std=0.02,
       disc_hidden_dims=(512, 512),
     ),
     experiment_name="pm1_falling_amp",
     save_interval=5000,
-    num_steps_per_env=30,
+    num_steps_per_env=32,
     max_iterations=30_000,
   )
-

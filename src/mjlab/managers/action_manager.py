@@ -41,10 +41,6 @@ class ActionTerm(ManagerTermBase):
   def raw_action(self) -> torch.Tensor:
     raise NotImplementedError
 
-  def override_with_default(self, env_ids: torch.Tensor) -> None:
-    """Override applied action with default for given envs (e.g. post-reset freeze). No-op by default."""
-    del env_ids  # Unused in base; subclasses that support freeze override this.
-
 
 class ActionManager(ManagerBase):
   def __init__(self, cfg: dict[str, ActionTermCfg], env: ManagerBasedRlEnv):
@@ -125,11 +121,6 @@ class ActionManager(ManagerBase):
   def apply_action(self) -> None:
     for term in self._terms.values():
       term.apply_actions()
-
-  def override_with_default(self, env_ids: torch.Tensor) -> None:
-    """For given env indices, set each term's applied action to its default (e.g. for post-reset freeze)."""
-    for term in self._terms.values():
-      term.override_with_default(env_ids)
 
   def get_active_iterable_terms(
     self, env_idx: int

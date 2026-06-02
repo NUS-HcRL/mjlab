@@ -11,5 +11,6 @@ motions/
 *_rerun*
 *.mp4
 artifacts/
+outputs/
 .venv/
 render_robots.py

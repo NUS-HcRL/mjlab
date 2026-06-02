@@ -73,9 +73,6 @@ class ManagerBasedRlEnvCfg:
   commands: dict[str, CommandTermCfg] | None = None
   curriculum: dict[str, CurriculumTermCfg] | None = None
   is_finite_horizon: bool = False
-  # For fall-like tasks: number of steps after reset to freeze joints (default pose)
-  # and zero reward. Used with push-at-reset to let the robot tip before RL starts.
-  post_reset_freeze_steps: int = 0
   # AMP (Adversarial Motion Priors): when set, env provides disc_obs in extras and
   # get_disc_obs_space() / fetch_disc_obs_demo() for discriminator-based training.
   amp: AMPCfg | None = None

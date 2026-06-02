@@ -97,6 +97,8 @@ def pm1_flat_falling_env_cfg(
     "LINK_TORSO_YAW": 500.0,
     "LINK_ELBOW_END_L": 500.0,
     "LINK_ELBOW_END_R": 500.0,
+    "LINK_SHOULDER_ROLL_L": 800.0,
+    "LINK_SHOULDER_ROLL_R": 800.0,
   }
 
   # PM1 LINK_BASE 在 MJCF 中 pos="0 0 0.82"，站立时 base 相对地面约 0.82 m
@@ -121,9 +123,9 @@ def pm1_flat_falling_env_cfg(
       "motion_file/pm_fall4:v0/Front_1_converted_50fps.npz",
       "motion_file/pm_fall4:v0/Left_1_converted_50fps.npz",
       "motion_file/pm_fall4:v0/Right_1_converted_50fps.npz",
-      "motion_file/pm_fall4:v0/LeftFront_1_converted_50fps.npz",
+      "motion_file/pm_fall4:v0/LeftFront_2_converted.npz",
       "motion_file/pm_fall4:v0/LeftBack_2_converted.npz",
-      "motion_file/pm_fall4:v0/RightFront_1_converted_50fps.npz",
+      "motion_file/pm_fall4:v0/RightFront_2_converted.npz",
       "motion_file/pm_fall4:v0/RightBack_2_converted.npz",
     ]
 

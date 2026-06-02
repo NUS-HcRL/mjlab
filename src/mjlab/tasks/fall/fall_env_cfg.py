@@ -287,35 +287,35 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
       params={"sensor_name": "self_collision"},
     ),
     "reduce_contact_force": RewardTermCfg(
-      func=mdp.reduce_contact_force_weighted,
-      weight=0.012, # 0.01
-      params={
-        "sensor_name": "body_contact_force",
-        "high_weight_bodies": (
+      func=mdp.ReduceContactForceWeighted(
+        sensor_name="body_contact_force",
+        high_weight_bodies=(
           "LINK_ELBOW_END_L",
           "LINK_ELBOW_END_R",
           "LINK_HEAD_YAW",
           "LINK_TORSO_YAW",
         ),
-        "medium_weight_bodies": (
-          "LINK_ELBOW_PITCH_L",
-          "LINK_ELBOW_PITCH_R",
-          "LINK_ELBOW_YAW_L",
-          "LINK_ELBOW_YAW_R",
-        ),
-        "shoulder_weight_bodies": (
+        medium_weight_bodies=(
           "LINK_SHOULDER_ROLL_L",
           "LINK_SHOULDER_ROLL_R",
           "LINK_SHOULDER_YAW_L",
           "LINK_SHOULDER_YAW_R",
         ),
-        "high_weight": 50.0,
-        "shoulder_weight": 20.0,
-        "medium_weight": 2.0,
-        "low_weight": 0.5,
-        "alpha": 0.5,
-        "squash_scale": 0.02,
-      },
+        high_weight=100.0,
+        medium_weight=60.0,
+        low_weight=0.5,
+        alpha=0.5,
+        squash_scale=0.02,
+        tracked_body_names=(
+          "LINK_HEAD_YAW",
+          "LINK_TORSO_YAW",
+          "LINK_ELBOW_END_L",
+          "LINK_ELBOW_END_R",
+          "LINK_SHOULDER_ROLL_L",
+          "LINK_SHOULDER_ROLL_R",
+        ),
+      ),
+      weight=0.012, # 0.01
     ),
     "control_descent_speed": RewardTermCfg(
       func=mdp.control_descent_speed,
@@ -335,62 +335,55 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
           "LINK_TORSO_YAW",
         ),
         medium_weight_bodies=(
-          "LINK_ELBOW_PITCH_L",
-          "LINK_ELBOW_PITCH_R",
-          "LINK_ELBOW_YAW_L",
-          "LINK_ELBOW_YAW_R",
-        ),
-        shoulder_weight_bodies=(
           "LINK_SHOULDER_ROLL_L",
           "LINK_SHOULDER_ROLL_R",
           "LINK_SHOULDER_YAW_L",
           "LINK_SHOULDER_YAW_R",
         ),
         high_weight=20.0,
-        shoulder_weight=10.0,
-        medium_weight=2.0,
+        medium_weight=10.0,
         low_weight=0.5,
         squash_scale=0.02,
       ),
       weight=1,
     ),
-    # "lower_then_upper_contact": RewardTermCfg(
-    #   func=mdp.LowerBodyThenUpperBodyContactReward(
-    #     sensor_name="body_contact_force",
-    #     lower_body_names=(
-    #       "LINK_BASE",
-    #       "LINK_HIP_PITCH_L",
-    #       "LINK_HIP_PITCH_R",
-    #       "LINK_HIP_ROLL_L",
-    #       "LINK_HIP_ROLL_R",
-    #       "LINK_HIP_YAW_L",
-    #       "LINK_HIP_YAW_R",
-    #       "LINK_KNEE_PITCH_L",
-    #       "LINK_KNEE_PITCH_R",
-    #     ),
-    #     upper_body_names=(
-    #       "LINK_TORSO_YAW",
-    #       "LINK_SHOULDER_ROLL_L",
-    #       "LINK_SHOULDER_ROLL_R",
-    #       "LINK_SHOULDER_YAW_L",
-    #       "LINK_SHOULDER_YAW_R",
-    #       "LINK_ELBOW_PITCH_L",
-    #       "LINK_ELBOW_PITCH_R",
-    #       "LINK_ELBOW_YAW_L",
-    #       "LINK_ELBOW_YAW_R",
-    #       "LINK_ELBOW_END_L",
-    #       "LINK_ELBOW_END_R",
-    #     ),
-    #     min_delay_s=0.2,
-    #     max_delay_s=0.6,
-    #     lower_first_bonus=0.5,
-    #     timely_upper_bonus=1.0,
-    #     early_upper_penalty=2.0,
-    #     late_upper_penalty=0.2,
-    #     early_upper_force_scale=0.0,
-    #   ),
-    #   weight=0.01,
-    # ),
+    "lower_then_upper_contact": RewardTermCfg(
+      func=mdp.LowerBodyThenUpperBodyContactReward(
+        sensor_name="body_contact_force",
+        lower_body_names=(
+          "LINK_BASE",
+          "LINK_HIP_PITCH_L",
+          "LINK_HIP_PITCH_R",
+          "LINK_HIP_ROLL_L",
+          "LINK_HIP_ROLL_R",
+          "LINK_HIP_YAW_L",
+          "LINK_HIP_YAW_R",
+          "LINK_KNEE_PITCH_L",
+          "LINK_KNEE_PITCH_R",
+        ),
+        upper_body_names=(
+          "LINK_TORSO_YAW",
+          "LINK_SHOULDER_ROLL_L",
+          "LINK_SHOULDER_ROLL_R",
+          "LINK_SHOULDER_YAW_L",
+          "LINK_SHOULDER_YAW_R",
+          "LINK_ELBOW_PITCH_L",
+          "LINK_ELBOW_PITCH_R",
+          "LINK_ELBOW_YAW_L",
+          "LINK_ELBOW_YAW_R",
+          "LINK_ELBOW_END_L",
+          "LINK_ELBOW_END_R",
+        ),
+        min_delay_s=0.2,
+        max_delay_s=0.6,
+        lower_first_bonus=0.5,
+        timely_upper_bonus=1.0,
+        early_upper_penalty=2.0,
+        late_upper_penalty=0.2,
+        early_upper_force_scale=0.0,
+      ),
+      weight=0.01,
+    ),
     "motor_overcurrent": RewardTermCfg(
       func=mdp.motor_overcurrent_penalty,
       weight=1e-3,
@@ -413,7 +406,7 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
       params={"asset_cfg": SceneEntityCfg("robot")},
     ),
     "forbidden_body_contact_force": TerminationTermCfg(
-      func=mdp.bad_body_contact_force,
+      func=mdp.BadBodyContactForce(),
       params={
         "sensor_name": "body_contact_force",
         "body_names": (),  # Set per-robot.
@@ -427,15 +420,15 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
   ##
 
   curriculum = {
-    # "task_reward_weight": CurriculumTermCfg(
-    #   func=task_reward_weight_curriculum,
-    #   params={
-    #     "stages": [
-    #       {"step": 0, "scale": 1.0},
-    #       {"step": 30_000 * 32, "scale": 1.5},
-    #     ],
-    #   },
-    # ),
+    "task_reward_weight": CurriculumTermCfg(
+      func=task_reward_weight_curriculum,
+      params={
+        "stages": [
+          {"step": 0, "scale": 1.0},
+          {"step": 30_000 * 32, "scale": 1.5},
+        ],
+      },
+    ),
     "reset_init": CurriculumTermCfg(
       func=reset_initialization_curriculum,
       params={
@@ -443,7 +436,7 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
         "init_stages": [
           {
             "step": 0,
-            "data_probability": 0.1,
+            "data_probability": 0.05,
             "tilt_pose_range": {
               "x": (-0.4, 0.4),
               "y": (-0.4, 0.4),
@@ -458,7 +451,7 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
           },
           {
             "step": 6_000 * 32,
-            "data_probability": 0.25,
+            "data_probability": 0.15,
             "tilt_pose_range": {
               "x": (-0.6, 0.6),
               "y": (-0.6, 0.6),
@@ -473,7 +466,7 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
           },
           {
             "step": 15_000 * 32,
-            "data_probability": 0.45,
+            "data_probability": 0.35,
             "tilt_pose_range": {
               "x": (-1, 1),
               "y": (-1, 1),
@@ -549,7 +542,7 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
             },
           },
           {
-            "step": 6_000 * 32,
+            "step": 10_000 * 32,
             "duration_steps_range": (4, 15),
             "force_axis_range": {
               "x": (-180.0, 180.0),
@@ -558,7 +551,7 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
             },
           },
           {
-            "step": 12_000 * 32,
+            "step": 15_000 * 32,
             "duration_steps_range": (5, 20),
             "force_axis_range": {
               "x": (-260.0, 260.0),
@@ -576,7 +569,7 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
         "actuator_indices": PM_Q25_ACTUATOR_INDICES,
         "effort_stages": [
           {"step": 0, "effort_limit": float(EFFORT_LIMIT_Q25)},
-          {"step": 26_000 * 32, "effort_limit": float(EFFORT_LIMIT_Q25) * 0.7},
+          {"step": 30_000 * 32, "effort_limit": float(EFFORT_LIMIT_Q25) * 0.7},
         ],
       },
     ),
@@ -587,7 +580,7 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
         "geom_names": PM_SOFT_CONTACT_CURRICULUM_GEOM_NAMES,
         "sol_stages": [
           {"step": 0, "profile": "default"},
-          {"step": 33_000 * 32, "profile": "soft_6mm"},
+          {"step": 35_000 * 32, "profile": "soft_6mm"},
         ],
       },
     ),
@@ -633,13 +626,12 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
       ),
     ),
     decimation=4,
-    episode_length_s=4.0,
-    post_reset_freeze_steps=0,
+    episode_length_s=5.0,
     amp=AMPCfg(
       # Keep root z for fall-state awareness, but drop root x/y and root 6D
       # orientation so the discriminator cannot separate expert/policy too
       # easily using obvious global pose shortcuts.
-      num_disc_obs_steps=3,  # 52-dim per step with current settings
+      num_disc_obs_steps=2,  # 52-dim per step with current settings
       asset_name="robot",
       root_body_name="LINK_BASE",
       motion_file=None,

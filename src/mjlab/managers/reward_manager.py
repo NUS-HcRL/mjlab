@@ -70,7 +70,9 @@ class RewardManager(ManagerBase):
       )
       self._episode_sums[key][env_ids] = 0.0
     for term_cfg in self._class_term_cfgs:
-      term_cfg.func.reset(env_ids=env_ids)
+      reset_info = term_cfg.func.reset(env_ids=env_ids)
+      if isinstance(reset_info, dict):
+        extras.update(reset_info)
     return extras
 
   def compute(self, dt: float) -> torch.Tensor:
