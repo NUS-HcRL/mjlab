@@ -573,17 +573,17 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
         ],
       },
     ),
-    "pm_soft_contact": CurriculumTermCfg(
-      func=pm_soft_contact_curriculum,
-      params={
-        "asset_cfg": SceneEntityCfg("robot"),
-        "geom_names": PM_SOFT_CONTACT_CURRICULUM_GEOM_NAMES,
-        "sol_stages": [
-          {"step": 0, "profile": "default"},
-          {"step": 35_000 * 32, "profile": "soft_6mm"},
-        ],
-      },
-    ),
+    # "pm_soft_contact": CurriculumTermCfg(
+    #   func=pm_soft_contact_curriculum,
+    #   params={
+    #     "asset_cfg": SceneEntityCfg("robot"),
+    #     "geom_names": PM_SOFT_CONTACT_CURRICULUM_GEOM_NAMES,
+    #     "sol_stages": [
+    #       {"step": 0, "profile": "default"},
+    #       {"step": 35_000 * 32, "profile": "soft_6mm"},
+    #     ],
+    #   },
+    # ),
   }
 
   ##
