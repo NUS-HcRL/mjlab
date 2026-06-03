@@ -54,7 +54,7 @@ def pm1_falling_amp_runner_cfg() -> RslRlOnPolicyRunnerCfg:
     algorithm=RslRlAmpAlgorithmCfg(
       value_loss_coef=1.0,
       use_clipped_value_loss=True,
-      clip_param=0.2,
+      clip_param=0.15,
       entropy_coef=0.001,
       num_learning_epochs=5,
       num_mini_batches=2,
@@ -82,6 +82,6 @@ def pm1_falling_amp_runner_cfg() -> RslRlOnPolicyRunnerCfg:
     ),
     experiment_name="pm1_falling_amp",
     save_interval=5000,
-    num_steps_per_env=32,
+    num_steps_per_env=48,
     max_iterations=30_000,
   )

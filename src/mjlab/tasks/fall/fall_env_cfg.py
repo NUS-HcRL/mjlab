@@ -315,7 +315,7 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
           "LINK_SHOULDER_ROLL_R",
         ),
       ),
-      weight=0.012, # 0.01
+      weight=0.015, # 0.01
     ),
     "control_descent_speed": RewardTermCfg(
       func=mdp.control_descent_speed,
@@ -378,11 +378,11 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
         max_delay_s=0.6,
         lower_first_bonus=0.5,
         timely_upper_bonus=1.0,
-        early_upper_penalty=2.0,
+        early_upper_penalty=4.0,
         late_upper_penalty=0.2,
         early_upper_force_scale=0.0,
       ),
-      weight=0.01,
+      weight=0.05,
     ),
     "motor_overcurrent": RewardTermCfg(
       func=mdp.motor_overcurrent_penalty,
@@ -420,15 +420,15 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
   ##
 
   curriculum = {
-    "task_reward_weight": CurriculumTermCfg(
-      func=task_reward_weight_curriculum,
-      params={
-        "stages": [
-          {"step": 0, "scale": 1.0},
-          {"step": 30_000 * 32, "scale": 1.5},
-        ],
-      },
-    ),
+    # "task_reward_weight": CurriculumTermCfg(
+    #   func=task_reward_weight_curriculum,
+    #   params={
+    #     "stages": [
+    #       {"step": 0, "scale": 1.0},
+    #       {"step": 30_000 * 32, "scale": 1.5},
+    #     ],
+    #   },
+    # ),
     "reset_init": CurriculumTermCfg(
       func=reset_initialization_curriculum,
       params={
@@ -451,7 +451,7 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
           },
           {
             "step": 6_000 * 32,
-            "data_probability": 0.15,
+            "data_probability": 0.1,
             "tilt_pose_range": {
               "x": (-0.6, 0.6),
               "y": (-0.6, 0.6),
@@ -466,7 +466,7 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
           },
           {
             "step": 15_000 * 32,
-            "data_probability": 0.35,
+            "data_probability": 0.25,
             "tilt_pose_range": {
               "x": (-1, 1),
               "y": (-1, 1),
