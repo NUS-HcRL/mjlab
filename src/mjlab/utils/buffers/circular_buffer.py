@@ -214,6 +214,53 @@ class CircularBuffer:
 
     self._num_pushes += 1
 
+  def seed_rows(
+    self,
+    batch_ids: Sequence[int] | torch.Tensor,
+    frames: torch.Tensor,
+  ) -> None:
+    """Write full chronological history for selected batch rows.
+
+    Args:
+      batch_ids: Environment indices to update.
+      frames: Tensor of shape ``(len(batch_ids), max_len, ...)`` with oldest
+        frames at index 0 and newest at ``max_len - 1``.
+    """
+    if frames.shape[1] != self._max_len:
+      raise ValueError(
+        f"Expected {self._max_len} history frames, got {frames.shape[1]}."
+      )
+
+    if isinstance(batch_ids, torch.Tensor):
+      ids = batch_ids.to(device=self._device, dtype=torch.long)
+    else:
+      ids = torch.tensor(list(batch_ids), device=self._device, dtype=torch.long)
+
+    if frames.shape[0] != ids.numel():
+      raise ValueError(
+        f"Expected {ids.numel()} history rows, got {frames.shape[0]}."
+      )
+
+    frames = frames.to(self._device)
+
+    if self._buffer is None:
+      self._pointer = self._max_len - 1
+      self._buffer = torch.empty(
+        (self._max_len, self._batch_size, *frames.shape[2:]),
+        dtype=frames.dtype,
+        device=self._device,
+      )
+
+    if self._pointer < 0:
+      self._pointer = self._max_len - 1
+
+    pointer = self._pointer
+    for lag in range(self._max_len):
+      slot = (pointer + 1 + lag) % self._max_len
+      self._buffer[slot, ids] = frames[:, lag]
+
+    self._num_pushes[ids] = self._max_len
+
   def __getitem__(self, key: torch.Tensor | int) -> torch.Tensor:
     """Retrieve lagged frames per batch (LIFO).
 

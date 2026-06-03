@@ -20,7 +20,7 @@ def _pm1_fall_reset_motion_csv_paths() -> tuple[str, ...]:
   """
   # env_cfgs.py -> pm1 -> config -> fall -> tasks -> mjlab -> src -> repo root
   repo_root = Path(__file__).resolve().parents[6]
-  d = repo_root / "data" / "amp_pm1_fall"
+  d = repo_root / "data" / "amp_fall"
   if not d.is_dir():
     return ()
   return tuple(str(p) for p in sorted(d.glob("*.csv")))
@@ -106,10 +106,10 @@ def pm1_flat_falling_env_cfg(
   #   cfg.rewards["base_height"].params["nominal_height"] = 0.82
 
   cfg.viewer.body_name = "LINK_TORSO_YAW"
-  # cfg.events["reset_base"].params["motion_files"] = (
-  #   _pm1_fall_reset_motion_csv_paths() if use_data_reset else ()
-  # )
-  cfg.events["reset_base"].params["motion_files"] = ("data/amp_pm1_fall/policy_switch_walking_combined.csv",)
+  cfg.events["reset_base"].params["motion_files"] = (
+    _pm1_fall_reset_motion_csv_paths() if use_data_reset else ()
+  )
+  # cfg.events["reset_base"].params["motion_files"] = ("data/amp_pm1_fall/policy_switch_walking_combined.csv",)
   cfg.events["reset_base"].params["data_root_body_name"] = "LINK_BASE"
   if not use_data_reset and cfg.curriculum is not None and "reset_init" in cfg.curriculum:
     init_stages = cfg.curriculum["reset_init"].params["init_stages"]

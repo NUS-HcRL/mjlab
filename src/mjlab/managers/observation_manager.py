@@ -155,6 +155,7 @@ class ObservationManager(ManagerBase):
     for group_name in self._group_obs_term_names:
       obs_buffer[group_name] = self.compute_group(group_name, update_history)
     self._obs_buffer = obs_buffer
+    self._clear_data_reset_obs_history_if_applied(update_history)
     return obs_buffer
 
   def compute_group(
@@ -185,6 +186,14 @@ class ObservationManager(ManagerBase):
         circular_buffer = self._group_obs_term_history_buffer[group_name][term_name]
         if update_history or not circular_buffer.is_initialized:
           circular_buffer.append(obs)
+          seed_batch = self._maybe_seed_data_reset_obs_history(
+            term_name=term_name,
+            current_obs=obs,
+            history_length=term_cfg.history_length,
+          )
+          if seed_batch is not None:
+            seed_env_ids, seed_frames = seed_batch
+            circular_buffer.seed_rows(seed_env_ids, seed_frames)
 
         if term_cfg.flatten_history_dim:
           group_obs[term_name] = circular_buffer.buffer.reshape(self._env.num_envs, -1)
@@ -293,3 +302,35 @@ class ObservationManager(ManagerBase):
         self._group_obs_term_dim[group_name].append(obs_dims[1:])
       self._group_obs_term_delay_buffer[group_name] = group_entry_delay_buffer
       self._group_obs_term_history_buffer[group_name] = group_entry_history_buffer
+
+  def _maybe_seed_data_reset_obs_history(
+    self,
+    term_name: str,
+    current_obs: torch.Tensor,
+    history_length: int,
+  ) -> tuple[torch.Tensor, torch.Tensor] | None:
+    try:
+      from mjlab.tasks.fall.mdp.events import try_build_data_reset_obs_history_frames
+    except ImportError:
+      return None
+    return try_build_data_reset_obs_history_frames(
+      env=self._env,
+      term_name=term_name,
+      current_obs=current_obs,
+      history_length=history_length,
+    )
+
+  def _clear_data_reset_obs_history_if_applied(self, update_history: bool) -> None:
+    if not update_history:
+      return
+    try:
+      from mjlab.tasks.fall.mdp.events import (
+        _DATA_RESET_OBS_PENDING_ATTR,
+        clear_data_reset_obs_history_state,
+      )
+    except ImportError:
+      return
+    pending = getattr(self._env, _DATA_RESET_OBS_PENDING_ATTR, None)
+    if pending is None or not pending.any():
+      return
+    clear_data_reset_obs_history_state(self._env)
