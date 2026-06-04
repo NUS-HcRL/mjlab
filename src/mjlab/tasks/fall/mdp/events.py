@@ -415,6 +415,7 @@ def _sample_motion_states(
   data_joint_position_range: tuple[float, float],
   data_joint_velocity_range: tuple[float, float],
   asset_name: str,
+  use_data_reset_obs_history: bool,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
   root_ids, _ = asset.find_bodies((data_root_body_name,), preserve_order=True)
   if not root_ids:
@@ -509,12 +510,13 @@ def _sample_motion_states(
   joint_limits = soft_joint_pos_limits[env_ids]
   joint_pos = joint_pos.clamp_(joint_limits[..., 0], joint_limits[..., 1])
 
-  _register_data_reset_obs_history(
-    env=env,
-    data_env_ids=env_ids,
-    pool_row_ids=state_ids,
-    motion_pool=motion_pool,
-  )
+  if use_data_reset_obs_history:
+    _register_data_reset_obs_history(
+      env=env,
+      data_env_ids=env_ids,
+      pool_row_ids=state_ids,
+      motion_pool=motion_pool,
+    )
   return root_state, joint_pos, joint_vel
 
 
@@ -671,6 +673,7 @@ def reset_root_state_mixed(
   data_velocity_range: dict[str, tuple[float, float]] | None = None,
   data_joint_position_range: tuple[float, float] = (0.0, 0.0),
   data_joint_velocity_range: tuple[float, float] = (0.0, 0.0),
+  use_data_reset_obs_history: bool = False,
   asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
 ) -> None:
   """Reset robot using a mixture of dangerous tilt states and motion data states."""
@@ -723,6 +726,7 @@ def reset_root_state_mixed(
       data_joint_position_range=data_joint_position_range,
       data_joint_velocity_range=data_joint_velocity_range,
       asset_name=asset_cfg.name,
+      use_data_reset_obs_history=use_data_reset_obs_history,
     )
     _write_state_and_forward(
       env, asset, data_env_ids, data_root, data_joint_pos, data_joint_vel

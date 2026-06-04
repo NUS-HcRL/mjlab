@@ -436,7 +436,7 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
         "init_stages": [
           {
             "step": 0,
-            "data_probability": 0.1,
+            "data_probability": 0.05,
             "tilt_pose_range": {
               "x": (-0.4, 0.4),
               "y": (-0.4, 0.4),
@@ -451,7 +451,7 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
           },
           {
             "step": 6_000 * 32,
-            "data_probability": 0.18,
+            "data_probability": 0.15,
             "tilt_pose_range": {
               "x": (-0.6, 0.6),
               "y": (-0.6, 0.6),
@@ -466,7 +466,7 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
           },
           {
             "step": 15_000 * 32,
-            "data_probability": 0.35,
+            "data_probability": 0.25,
             "tilt_pose_range": {
               "x": (-1, 1),
               "y": (-1, 1),

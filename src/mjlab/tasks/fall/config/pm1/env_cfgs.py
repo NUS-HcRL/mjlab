@@ -13,14 +13,17 @@ from mjlab.sensor import ContactMatch, ContactSensorCfg
 from mjlab.tasks.fall.fall_env_cfg import make_fall_env_cfg
 
 
-def _pm1_fall_reset_motion_csv_paths() -> tuple[str, ...]:
-  """Paths to every ``*.csv`` under repo ``data/amp_pm1_fall/`` (sorted by name).
+def _pm1_fall_reset_motion_csv_paths(
+  use_data_reset_obs_history: bool,
+) -> tuple[str, ...]:
+  """Paths to reset CSV files, selecting legacy or obs-history data.
 
   Rows from all files are concatenated into one reset pool (see fall ``mdp.events``).
   """
   # env_cfgs.py -> pm1 -> config -> fall -> tasks -> mjlab -> src -> repo root
   repo_root = Path(__file__).resolve().parents[6]
-  d = repo_root / "data" / "amp_fall"
+  data_dir = "amp_fall" if use_data_reset_obs_history else "amp_pm1_fall"
+  d = repo_root / "data" / data_dir
   if not d.is_dir():
     return ()
   return tuple(str(p) for p in sorted(d.glob("*.csv")))
@@ -30,6 +33,7 @@ def pm1_flat_falling_env_cfg(
   has_state_estimation: bool = True,
   play: bool = False,
   use_data_reset: bool = True,
+  use_data_reset_obs_history: bool = False,
 ) -> ManagerBasedRlEnvCfg:
   """Create PM1 flat terrain fall (joint-state tracking) configuration.
 
@@ -107,8 +111,13 @@ def pm1_flat_falling_env_cfg(
 
   cfg.viewer.body_name = "LINK_TORSO_YAW"
   cfg.events["reset_base"].params["motion_files"] = (
-    _pm1_fall_reset_motion_csv_paths() if use_data_reset else ()
+    _pm1_fall_reset_motion_csv_paths(use_data_reset_obs_history)
+    if use_data_reset
+    else ()
   )
+  cfg.events["reset_base"].params[
+    "use_data_reset_obs_history"
+  ] = use_data_reset_obs_history
   # cfg.events["reset_base"].params["motion_files"] = ("data/amp_pm1_fall/policy_switch_walking_combined.csv",)
   cfg.events["reset_base"].params["data_root_body_name"] = "LINK_BASE"
   if not use_data_reset and cfg.curriculum is not None and "reset_init" in cfg.curriculum:
