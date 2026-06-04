@@ -466,7 +466,7 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
           },
           {
             "step": 16_000 * 32,
-            "data_probability": 0.25,
+            "data_probability": 0.3,
             "tilt_pose_range": {
               "x": (-1, 1),
               "y": (-1, 1),

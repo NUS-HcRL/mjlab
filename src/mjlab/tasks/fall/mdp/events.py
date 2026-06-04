@@ -56,6 +56,14 @@ def _pre_switch_base_quat_cols(prefix: str) -> list[str]:
   ]
 
 
+def _pre_switch_base_pos_cols(prefix: str) -> list[str]:
+  return [f"pre_{prefix}_base_pos_w_{axis}" for axis in ("x", "y", "z")]
+
+
+def _pre_switch_base_lin_vel_cols(prefix: str) -> list[str]:
+  return [f"pre_{prefix}_base_lin_vel_w_{axis}" for axis in ("x", "y", "z")]
+
+
 def _pre_switch_base_ang_vel_cols(prefix: str) -> list[str]:
   return [
     f"pre_{prefix}_base_ang_vel_w_{axis}" for axis in ("x", "y", "z")
@@ -78,7 +86,11 @@ def _load_pre_switch_history_tensors(
     (num_rows, num_frames, num_joints), dtype=torch.float32, device=device
   )
   joint_vel = torch.zeros_like(joint_pos)
+  base_pos_w = torch.zeros(
+    (num_rows, num_frames, 3), dtype=torch.float32, device=device
+  )
   base_quat = torch.zeros((num_rows, num_frames, 4), dtype=torch.float32, device=device)
+  base_lin_vel_w = torch.zeros_like(base_pos_w)
   base_ang_vel_w = torch.zeros(
     (num_rows, num_frames, 3), dtype=torch.float32, device=device
   )
@@ -86,11 +98,20 @@ def _load_pre_switch_history_tensors(
   for frame_idx, prefix in enumerate(_PRE_SWITCH_HISTORY_SUFFIXES):
     joint_pos_cols = _pre_switch_joint_cols(prefix, num_joints, "pos")
     joint_vel_cols = _pre_switch_joint_cols(prefix, num_joints, "vel")
+    pos_cols = _pre_switch_base_pos_cols(prefix)
     quat_cols = _pre_switch_base_quat_cols(prefix)
+    lin_cols = _pre_switch_base_lin_vel_cols(prefix)
     ang_cols = _pre_switch_base_ang_vel_cols(prefix)
     missing = [
       col
-      for col in joint_pos_cols + joint_vel_cols + quat_cols + ang_cols
+      for col in (
+        joint_pos_cols
+        + joint_vel_cols
+        + pos_cols
+        + quat_cols
+        + lin_cols
+        + ang_cols
+      )
       if col not in fieldnames
     ]
     if missing:
@@ -109,8 +130,18 @@ def _load_pre_switch_history_tensors(
       dtype=torch.float32,
       device=device,
     )
+    base_pos_w[:, frame_idx] = torch.tensor(
+      [[float(row[col]) for col in pos_cols] for row in rows],
+      dtype=torch.float32,
+      device=device,
+    )
     base_quat[:, frame_idx] = torch.tensor(
       [[float(row[col]) for col in quat_cols] for row in rows],
+      dtype=torch.float32,
+      device=device,
+    )
+    base_lin_vel_w[:, frame_idx] = torch.tensor(
+      [[float(row[col]) for col in lin_cols] for row in rows],
       dtype=torch.float32,
       device=device,
     )
@@ -124,7 +155,9 @@ def _load_pre_switch_history_tensors(
   return {
     "pre_joint_pos": joint_pos,
     "pre_joint_vel": joint_vel,
+    "pre_base_pos_w": base_pos_w,
     "pre_base_quat": base_quat,
+    "pre_base_lin_vel_w": base_lin_vel_w,
     "pre_base_ang_vel_w": base_ang_vel_w,
     "has_pre_history": torch.ones(num_rows, dtype=torch.bool, device=device),
   }
@@ -239,8 +272,14 @@ def _load_motion_reset_csv(
     "has_pre_history": torch.zeros(num_rows, dtype=torch.bool, device=device),
     "pre_joint_pos": pre_joint_pos,
     "pre_joint_vel": torch.zeros_like(pre_joint_pos),
+    "pre_base_pos_w": torch.zeros(
+      (num_rows, num_frames, 3), dtype=torch.float32, device=device
+    ),
     "pre_base_quat": torch.zeros(
       (num_rows, num_frames, 4), dtype=torch.float32, device=device
+    ),
+    "pre_base_lin_vel_w": torch.zeros(
+      (num_rows, num_frames, 3), dtype=torch.float32, device=device
     ),
     "pre_base_ang_vel_w": torch.zeros(
       (num_rows, num_frames, 3), dtype=torch.float32, device=device
@@ -310,7 +349,13 @@ def _get_motion_reset_pool(
     ),
     "pre_joint_pos": torch.cat([motion["pre_joint_pos"] for motion in datasets], dim=0),
     "pre_joint_vel": torch.cat([motion["pre_joint_vel"] for motion in datasets], dim=0),
+    "pre_base_pos_w": torch.cat(
+      [motion["pre_base_pos_w"] for motion in datasets], dim=0
+    ),
     "pre_base_quat": torch.cat([motion["pre_base_quat"] for motion in datasets], dim=0),
+    "pre_base_lin_vel_w": torch.cat(
+      [motion["pre_base_lin_vel_w"] for motion in datasets], dim=0
+    ),
     "pre_base_ang_vel_w": torch.cat(
       [motion["pre_base_ang_vel_w"] for motion in datasets], dim=0
     ),
@@ -611,12 +656,18 @@ def try_build_data_reset_obs_history_frames(
     return env_ids, frames
 
   if term_name == "joint_pos":
-    pre = motion_pool["pre_joint_pos"][row_ids] - default_joint_pos[env_ids].unsqueeze(1)
+    pre = (
+      motion_pool["pre_joint_pos"][row_ids]
+      - default_joint_pos[env_ids].unsqueeze(1)
+    )
     frames = torch.cat([pre, current_obs[env_ids].unsqueeze(1)], dim=1)
     return env_ids, frames
 
   if term_name == "joint_vel":
-    pre = motion_pool["pre_joint_vel"][row_ids] - default_joint_vel[env_ids].unsqueeze(1)
+    pre = (
+      motion_pool["pre_joint_vel"][row_ids]
+      - default_joint_vel[env_ids].unsqueeze(1)
+    )
     frames = torch.cat([pre, current_obs[env_ids].unsqueeze(1)], dim=1)
     return env_ids, frames
 
@@ -629,6 +680,20 @@ def try_build_data_reset_obs_history_frames(
       pre_ang_w.reshape(n * t, 3),
     ).reshape(n, t, 3)
     frames = torch.cat([pre_b, current_obs[env_ids].unsqueeze(1)], dim=1)
+    return env_ids, frames
+
+  if term_name == "base_pos":
+    frames = torch.cat(
+      [motion_pool["pre_base_pos_w"][row_ids], current_obs[env_ids].unsqueeze(1)],
+      dim=1,
+    )
+    return env_ids, frames
+
+  if term_name == "base_lin_vel":
+    frames = torch.cat(
+      [motion_pool["pre_base_lin_vel_w"][row_ids], current_obs[env_ids].unsqueeze(1)],
+      dim=1,
+    )
     return env_ids, frames
 
   if term_name == "projected_gravity":

@@ -14,3 +14,4 @@ artifacts/
 outputs/
 .venv/
 render_robots.py
+.DS_Store
