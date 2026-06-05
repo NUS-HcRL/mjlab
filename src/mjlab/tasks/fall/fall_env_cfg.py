@@ -425,7 +425,7 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
       params={
         "stages": [
           {"step": 0, "scale": 1.0},
-          {"step": 25_000 * 32, "scale": 2.0},
+          {"step": 25_000 * 32, "scale": 1.4},
         ],
       },
     ),
