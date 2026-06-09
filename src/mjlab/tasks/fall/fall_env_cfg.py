@@ -451,7 +451,7 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
           },
           {
             "step": 6_000 * 32,
-            "data_probability": 0.15,
+            "data_probability": 0.20,
             "tilt_pose_range": {
               "x": (-0.6, 0.6),
               "y": (-0.6, 0.6),
@@ -466,7 +466,7 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
           },
           {
             "step": 16_000 * 32,
-            "data_probability": 0.3,
+            "data_probability": 0.50,
             "tilt_pose_range": {
               "x": (-1, 1),
               "y": (-1, 1),
@@ -573,17 +573,17 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
         ],
       },
     ),
-    "pm_soft_contact": CurriculumTermCfg(
-      func=pm_soft_contact_curriculum,
-      params={
-        "asset_cfg": SceneEntityCfg("robot"),
-        "geom_names": PM_SOFT_CONTACT_CURRICULUM_GEOM_NAMES,
-        "sol_stages": [
-          {"step": 0, "profile": "default"},
-          {"step": 40_000 * 32, "profile": "soft_6mm"},
-        ],
-      },
-    ),
+    # "pm_soft_contact": CurriculumTermCfg(
+    #   func=pm_soft_contact_curriculum,
+    #   params={
+    #     "asset_cfg": SceneEntityCfg("robot"),
+    #     "geom_names": PM_SOFT_CONTACT_CURRICULUM_GEOM_NAMES,
+    #     "sol_stages": [
+    #       {"step": 0, "profile": "default"},
+    #       {"step": 40_000 * 32, "profile": "soft_6mm"},
+    #     ],
+    #   },
+    # ),
   }
 
   ##
