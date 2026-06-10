@@ -407,6 +407,119 @@ class LowerBodyThenUpperBodyContactReward:
     return reward
 
 
+class ProtectiveContactReward:
+  """Encourage large or first ground contacts to land on protective bodies."""
+
+  def __init__(
+    self,
+    sensor_name: str,
+    protected_body_names: tuple[str, ...],
+    force_scale: float = 250.0,
+    first_contact_bonus: float = 1.0,
+    protected_force_bonus: float = 1.0,
+    unprotected_force_penalty: float = 0.25,
+  ) -> None:
+    self.sensor_name = sensor_name
+    self.protected_body_names = protected_body_names
+    self.force_scale = force_scale
+    self.first_contact_bonus = first_contact_bonus
+    self.protected_force_bonus = protected_force_bonus
+    self.unprotected_force_penalty = unprotected_force_penalty
+    self._body_names: list[str] | None = None
+    self._protected_body_ids: list[int] | None = None
+    self._metric_sums: dict[str, torch.Tensor] = {}
+    self._metric_steps: torch.Tensor | None = None
+
+  def _maybe_initialize(self, env: ManagerBasedRlEnv) -> bool:
+    sensor: ContactSensor = env.scene[self.sensor_name]
+    assert sensor.data.force is not None
+    assert sensor.data.found is not None
+    if self._body_names is None:
+      self._body_names = _get_sensor_body_names(sensor)
+    if self._protected_body_ids is None:
+      self._protected_body_ids = [
+        i for i, name in enumerate(self._body_names) if name in self.protected_body_names
+      ]
+    if not self._protected_body_ids:
+      return False
+    if self._metric_steps is None or self._metric_steps.shape[0] != env.num_envs:
+      self._metric_steps = torch.zeros(env.num_envs, device=env.device)
+      self._metric_sums = {}
+    return True
+
+  def _accumulate(self, name: str, value: torch.Tensor) -> None:
+    if name not in self._metric_sums:
+      self._metric_sums[name] = torch.zeros_like(value)
+    self._metric_sums[name] += value
+
+  def reset(
+    self,
+    env_ids: torch.Tensor | slice | None = None,
+  ) -> dict[str, torch.Tensor]:
+    if self._metric_steps is None:
+      return {}
+    if env_ids is None:
+      env_ids = slice(None)
+    denom = self._metric_steps[env_ids].clamp_min(1.0)
+    extras = {
+      f"Metrics/protective_contact/{name}": (value[env_ids] / denom).mean()
+      for name, value in self._metric_sums.items()
+    }
+    self._metric_steps[env_ids] = 0.0
+    for value in self._metric_sums.values():
+      value[env_ids] = 0.0
+    return extras
+
+  def __call__(self, env: ManagerBasedRlEnv) -> torch.Tensor:
+    if not self._maybe_initialize(env):
+      return torch.zeros(env.num_envs, device=env.device)
+    assert self._protected_body_ids is not None
+    assert self._metric_steps is not None
+
+    sensor: ContactSensor = env.scene[self.sensor_name]
+    assert sensor.data.force is not None
+    assert sensor.data.found is not None
+
+    contact_indicators = (sensor.data.found > 0).float()
+    force_norm = torch.norm(contact_indicators.unsqueeze(-1) * sensor.data.force, dim=-1)
+    protected_force = force_norm[:, self._protected_body_ids]
+    protected_max = protected_force.max(dim=-1).values
+
+    protected_mask = torch.zeros_like(force_norm, dtype=torch.bool)
+    protected_mask[:, self._protected_body_ids] = True
+    unprotected_force = torch.where(
+      protected_mask,
+      torch.zeros_like(force_norm),
+      force_norm,
+    )
+    unprotected_max = unprotected_force.max(dim=-1).values
+
+    first_contact = sensor.compute_first_contact(dt=env.step_dt)
+    protected_first = torch.any(first_contact[:, self._protected_body_ids], dim=-1)
+    any_first = torch.any(first_contact, dim=-1)
+    unprotected_first = any_first & ~protected_first
+
+    force_scale = max(self.force_scale, 1e-6)
+    protected_score = torch.log1p(protected_max / force_scale)
+    unprotected_score = torch.log1p(unprotected_max / force_scale)
+    reward = (
+      self.protected_force_bonus * protected_score
+      + self.first_contact_bonus * protected_first.float()
+      - self.unprotected_force_penalty * unprotected_score
+      - self.first_contact_bonus * self.unprotected_force_penalty * unprotected_first.float()
+    )
+
+    total_force = force_norm.sum(dim=-1).clamp_min(1e-6)
+    protected_share = protected_force.sum(dim=-1) / total_force
+    self._metric_steps += 1.0
+    self._accumulate("protected_force_share", protected_share)
+    self._accumulate("protected_force_max", protected_max)
+    self._accumulate("unprotected_force_max", unprotected_max)
+    self._accumulate("protected_first_contact_rate", protected_first.float())
+    self._accumulate("unprotected_first_contact_rate", unprotected_first.float())
+    return reward
+
+
 def soft_landing(
   env: ManagerBasedRlEnv,
   sensor_name: str,

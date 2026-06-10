@@ -36,7 +36,7 @@ def pm1_falling_ppo_runner_cfg() -> RslRlOnPolicyRunnerCfg:
     experiment_name="pm1_falling",
     save_interval=2000,
     num_steps_per_env=24,
-    max_iterations=30_000,
+    max_iterations=40_000,
   )
 
 def pm1_falling_amp_runner_cfg() -> RslRlOnPolicyRunnerCfg:
@@ -83,5 +83,24 @@ def pm1_falling_amp_runner_cfg() -> RslRlOnPolicyRunnerCfg:
     experiment_name="pm1_falling_amp",
     save_interval=5000,
     num_steps_per_env=30,
-    max_iterations=30_000,
+    max_iterations=40_000,
   )
+
+
+def pm1_falling_amp_protective_finetune_runner_cfg() -> RslRlOnPolicyRunnerCfg:
+  """Create AMP runner config for PM1 protective-contact finetuning."""
+  cfg = pm1_falling_amp_runner_cfg()
+  assert isinstance(cfg.algorithm, RslRlAmpAlgorithmCfg)
+  cfg.algorithm.learning_rate = 2.0e-5
+  cfg.algorithm.clip_param = 0.1
+  cfg.algorithm.desired_kl = 0.006
+  cfg.algorithm.use_clipped_value_loss = True
+  cfg.algorithm.kl_early_stop = True
+  cfg.algorithm.kl_early_stop_multiplier = 2.0
+  cfg.algorithm.actor_freeze_iterations = 300
+  cfg.algorithm.freeze_discriminator = True
+  cfg.experiment_name = "pm1_falling_amp_protective_finetune"
+  cfg.save_interval = 1000
+  cfg.max_iterations = 10_000
+  cfg.load_optimizer = False
+  return cfg

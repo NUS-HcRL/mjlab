@@ -1,6 +1,7 @@
 """Script to train RL agent with RSL-RL."""
 
 import csv
+import inspect
 import logging
 import os
 import sys
@@ -466,7 +467,11 @@ def run_train(task_id: str, cfg: TrainConfig, log_dir: Path) -> None:
   runner.add_git_repo_to_log(__file__)
   if resume_path is not None:
     print(f"[INFO]: Loading model checkpoint from: {resume_path}")
-    runner.load(str(resume_path))
+    load_sig = inspect.signature(runner.load)
+    if "load_optimizer" in load_sig.parameters:
+      runner.load(str(resume_path), load_optimizer=cfg.agent.load_optimizer)
+    else:
+      runner.load(str(resume_path))
 
   # Only write config files from rank 0 to avoid race conditions.
   if rank == 0:

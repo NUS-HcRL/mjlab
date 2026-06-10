@@ -19,3 +19,6 @@ from mjlab.asset_zoo.robots.engineai_pm01.pm01_8 import (
 from mjlab.asset_zoo.robots.engineai_pm01.pm01_8 import (
   PM_ROBOT_CFG as PM_ROBOT_CFG,
 )
+from mjlab.asset_zoo.robots.engineai_pm01.pm01_8 import (
+  PM_PROTECTIVE_FINETUNE_ROBOT_CFG as PM_PROTECTIVE_FINETUNE_ROBOT_CFG,
+)

@@ -107,6 +107,14 @@ class RslRlAmpAlgorithmCfg(RslRlPpoAlgorithmCfg):
   """Std of Gaussian instance noise added to discriminator inputs during training."""
   disc_eval_batch_size: int = 0
   """Minibatch size for disc reward eval (0 = no minibatch)."""
+  kl_early_stop: bool = False
+  """Whether to stop PPO minibatch updates early when KL exceeds the configured limit."""
+  kl_early_stop_multiplier: float = 2.0
+  """Early-stop threshold multiplier applied to desired_kl."""
+  actor_freeze_iterations: int = 0
+  """Number of finetune updates that train only the critic/value loss."""
+  freeze_discriminator: bool = False
+  """Whether to keep the AMP discriminator fixed during training."""
 
 
 @dataclass
@@ -140,6 +148,8 @@ class RslRlBaseRunnerCfg:
   """The checkpoint file to load. Default is "model_.*.pt" (all). If regex expression,
   the latest (alphabetical order) matching file will be loaded.
   """
+  load_optimizer: bool = True
+  """Whether to load optimizer state when resuming from a checkpoint."""
   clip_actions: float | None = None
   """The clipping range for action values. If None (default), no clipping is applied."""
 

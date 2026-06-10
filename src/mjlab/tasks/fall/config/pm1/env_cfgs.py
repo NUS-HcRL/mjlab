@@ -4,13 +4,48 @@ from pathlib import Path
 
 from mjlab.asset_zoo.robots import (
   PM_ACTION_SCALE,
+  PM_PROTECTIVE_FINETUNE_ROBOT_CFG,
   PM_ROBOT_CFG,
+)
+from mjlab.asset_zoo.robots.engineai_pm01.pm01_8 import (
+  EFFORT_LIMIT_Q25,
+  PM_PROTECTIVE_BODY_NAMES,
+  PM_Q25_ACTUATOR_INDICES,
 )
 from mjlab.envs import ManagerBasedRlEnvCfg
 from mjlab.envs.mdp.actions import JointPositionActionCfg
+from mjlab.managers.manager_term_config import CurriculumTermCfg, RewardTermCfg
 from mjlab.managers.scene_entity_config import SceneEntityCfg
 from mjlab.sensor import ContactMatch, ContactSensorCfg
+from mjlab.tasks.fall import mdp
 from mjlab.tasks.fall.fall_env_cfg import make_fall_env_cfg
+
+
+def _last_stage_at_start(stage: dict) -> dict:
+  """Return a shallow copy of a curriculum stage active from finetune step 0."""
+  return {**stage, "step": 0}
+
+
+def _freeze_curriculum_to_final_stage(cfg: ManagerBasedRlEnvCfg) -> None:
+  """Start finetuning with each enabled curriculum at its final base-training stage."""
+  if cfg.curriculum is None:
+    return
+
+  stage_param_names = {
+    "task_reward_weight": "stages",
+    "reset_init": "init_stages",
+    "reset_push": "push_stages",
+    "reset_force_pulse": "pulse_stages",
+    "q25_effort_limit": "effort_stages",
+  }
+  for term_name, param_name in stage_param_names.items():
+    term = cfg.curriculum.get(term_name)
+    if term is None:
+      continue
+    stages = term.params.get(param_name)
+    if not stages:
+      continue
+    term.params[param_name] = [_last_stage_at_start(stages[-1])]
 
 
 def _pm1_fall_reset_motion_csv_paths(
@@ -34,6 +69,7 @@ def pm1_flat_falling_env_cfg(
   play: bool = False,
   use_data_reset: bool = True,
   use_data_reset_obs_history: bool = True,
+  protective_finetune: bool = False,
 ) -> ManagerBasedRlEnvCfg:
   """Create PM1 flat terrain fall (joint-state tracking) configuration.
 
@@ -43,7 +79,11 @@ def pm1_flat_falling_env_cfg(
   del has_state_estimation  # Unused for fall; policy has no motion anchor / base_lin_vel
   cfg = make_fall_env_cfg()
 
-  cfg.scene.entities = {"robot": PM_ROBOT_CFG}
+  cfg.scene.entities = {
+    "robot": PM_PROTECTIVE_FINETUNE_ROBOT_CFG
+    if protective_finetune
+    else PM_ROBOT_CFG
+  }
 
   # Self-collision detection for PM1
   self_collision_cfg = ContactSensorCfg(
@@ -105,6 +145,31 @@ def pm1_flat_falling_env_cfg(
     "LINK_SHOULDER_ROLL_R": 800.0,
   }
 
+  if protective_finetune:
+    _freeze_curriculum_to_final_stage(cfg)
+    cfg.rewards["protective_contact"] = RewardTermCfg(
+      func=mdp.ProtectiveContactReward(
+        sensor_name="body_contact_force",
+        protected_body_names=PM_PROTECTIVE_BODY_NAMES,
+        force_scale=250.0,
+        first_contact_bonus=1.0,
+        protected_force_bonus=1.0,
+        unprotected_force_penalty=0.35,
+      ),
+      weight=0.15,
+    )
+    if cfg.curriculum is not None:
+      cfg.curriculum["q25_effort_limit"] = CurriculumTermCfg(
+        func=mdp.q25_effort_limit_curriculum,
+        params={
+          "asset_cfg": SceneEntityCfg("robot"),
+          "actuator_indices": PM_Q25_ACTUATOR_INDICES,
+          "effort_stages": [
+            {"step": 0, "effort_limit": float(EFFORT_LIMIT_Q25) * 0.5},
+          ],
+        },
+      )
+
   # PM1 LINK_BASE 在 MJCF 中 pos="0 0 0.82"，站立时 base 相对地面约 0.82 m
   # if "base_height" in cfg.rewards:
   #   cfg.rewards["base_height"].params["nominal_height"] = 0.82
@@ -154,8 +219,8 @@ def pm1_flat_falling_env_cfg(
       cfg.curriculum.pop("reset_init", None)
       cfg.curriculum.pop("reset_push", None)
       cfg.curriculum.pop("reset_force_pulse", None)
-      cfg.curriculum.pop("q25_effort_limit", None)
-      cfg.curriculum.pop("pm_soft_contact", None)
+      if not protective_finetune:
+        cfg.curriculum.pop("q25_effort_limit", None)
     if "push_at_reset" in cfg.events:
       # In play mode, use a deterministic forward push so resets are reproducible.
       cfg.events["push_at_reset"].params["velocity_range"] = {

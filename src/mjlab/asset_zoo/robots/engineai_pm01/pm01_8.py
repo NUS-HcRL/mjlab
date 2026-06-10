@@ -1,5 +1,6 @@
 """Unitree G1 constants."""
 
+from dataclasses import replace
 from pathlib import Path
 
 import mujoco
@@ -215,9 +216,11 @@ PM_ACTUATOR_HEAD = BuiltinPositionActuatorCfg(
 # solimp = (d0, dmax, width)  larger width => thicker compliant layer
 SOLIMP_CONTACT_SOFT_6mm = (0.9, 0.95, 0.001)  # 6 mm compliant layer
 SOLREF_CONTACT_SOFT_6mm = (0.01, 1.0)
+SOLIMP_PROTECTIVE_FINETUNE = SOLIMP_CONTACT_SOFT_6mm
+SOLREF_PROTECTIVE_FINETUNE = SOLREF_CONTACT_SOFT_6mm
 # default solref
 SOLIMP_CONTACT_DEFAULT = (0.9, 0.95, 0.001)  # MuJoCo 默认 0.9, 0.95, 0.001
-SOLREF_CONTACT_DEFAULT = (0.0005, 1.0) # MuJoCo 默认 0.02, 1.0
+SOLREF_CONTACT_DEFAULT = (0.02, 1.0) # MuJoCo 默认 0.02, 1.0
 # Sole + toe contact (not ankle proxy spheres).
 SOLIMP_CONTACT_FOOT = (0.9, 0.95, 0.023)
 SOLREF_CONTACT_FOOT = (0.0005, 1.0)
@@ -374,14 +377,28 @@ PM_ARTICULATION = EntityArticulationInfoCfg(
 # (same order as PM_ARTICULATION.actuators above).
 PM_Q25_ACTUATOR_INDICES: tuple[int, ...] = (2, 3, 4, 5, 6)
 
-# Geoms whose solref/solimp are staged by ``pm_soft_contact`` fall curriculum.
-PM_SOFT_CONTACT_CURRICULUM_GEOM_NAMES: tuple[str, ...] = (
-  "collision_left_knee_pitch",
-  "collision_right_knee_pitch",
-  "collision_left_elbow_pitch",
-  "collision_left_elbow_capsule",
-  "collision_right_elbow_pitch",
-  "collision_right_elbow_capsule",
+# Protective finetune geoms (aligned with ``PM_PROTECTIVE_BODY_NAMES``).
+PM_PROTECTIVE_FINETUNE_GEOM_NAMES_EXPR: tuple[str, ...] = (
+  r"^collision_(left|right)_knee_pitch$",
+  r"^collision_(left|right)_elbow_(pitch|capsule)$",
+  r"^collision_(left|right)_hip$",
+)
+
+PM_PROTECTIVE_BODY_NAMES: tuple[str, ...] = (
+  "LINK_KNEE_PITCH_L",
+  "LINK_KNEE_PITCH_R",
+  "LINK_ELBOW_PITCH_L",
+  "LINK_ELBOW_PITCH_R",
+  "LINK_HIP_PITCH_L",
+  "LINK_HIP_PITCH_R",
+)
+
+PM_PROTECTIVE_FINETUNE_COLLISION = CollisionCfg(
+  geom_names_expr=PM_PROTECTIVE_FINETUNE_GEOM_NAMES_EXPR,
+  priority=1,
+  solimp=SOLIMP_PROTECTIVE_FINETUNE,
+  solref=SOLREF_PROTECTIVE_FINETUNE,
+  disable_other_geoms=False,
 )
 
 PM_ROBOT_CFG = EntityCfg(
@@ -389,6 +406,11 @@ PM_ROBOT_CFG = EntityCfg(
   collisions=(PM_NAMED_FULL_COLLISION,),
   spec_fn=get_spec,
   articulation=PM_ARTICULATION,
+)
+
+PM_PROTECTIVE_FINETUNE_ROBOT_CFG = replace(
+  PM_ROBOT_CFG,
+  collisions=PM_ROBOT_CFG.collisions + (PM_PROTECTIVE_FINETUNE_COLLISION,),
 )
 
 # Action scaling similar to @unitree_g1

@@ -3,7 +3,11 @@ from mjlab.tasks.fall.rl import FallOnPolicyRunner
 from mjlab.rl.mj_amp_runner import MjlabAmpOnPolicyRunner
 
 from .env_cfgs import pm1_flat_falling_env_cfg
-from .rl_cfg import pm1_falling_amp_runner_cfg, pm1_falling_ppo_runner_cfg
+from .rl_cfg import (
+  pm1_falling_amp_protective_finetune_runner_cfg,
+  pm1_falling_amp_runner_cfg,
+  pm1_falling_ppo_runner_cfg,
+)
 
 try:
   import importlib
@@ -45,3 +49,10 @@ register_mjlab_task(
   runner_cls=MjlabAmpOnPolicyRunner,
 )
 
+register_mjlab_task(
+  task_id="Mjlab-Falling-Flat-PM1-AMP-Protective-Finetune",
+  env_cfg=pm1_flat_falling_env_cfg(protective_finetune=True),
+  play_env_cfg=pm1_flat_falling_env_cfg(play=True, protective_finetune=True),
+  rl_cfg=pm1_falling_amp_protective_finetune_runner_cfg(),
+  runner_cls=MjlabAmpOnPolicyRunner,
+)

@@ -85,6 +85,10 @@ class MjlabAmpPPO:
     disc_input_noise_std: float = 0.0,
     disc_eval_batch_size: int = 0,
     normalize_advantage_per_mini_batch: bool = False,
+    kl_early_stop: bool = False,
+    kl_early_stop_multiplier: float = 2.0,
+    actor_freeze_iterations: int = 0,
+    freeze_discriminator: bool = False,
   ) -> None:
     self.device = device
     self.desired_kl = desired_kl
@@ -113,6 +117,11 @@ class MjlabAmpPPO:
     self.use_clipped_value_loss = use_clipped_value_loss
     self.use_smooth_ratio_clipping = use_smooth_ratio_clipping
     self.normalize_advantage_per_mini_batch = normalize_advantage_per_mini_batch
+    self.kl_early_stop = kl_early_stop
+    self.kl_early_stop_multiplier = kl_early_stop_multiplier
+    self.actor_freeze_iterations = actor_freeze_iterations
+    self.freeze_discriminator = freeze_discriminator
+    self._policy_update_count = 0
 
     self.task_reward_weight = task_reward_weight
     self.disc_reward_weight = disc_reward_weight
@@ -250,6 +259,8 @@ class MjlabAmpPPO:
     mean_old_logp = 0.0
     mean_new_logp = 0.0
     mean_actor_grad_norm = 0.0
+    kl_checks = 0
+    actor_frozen = self._policy_update_count < self.actor_freeze_iterations
 
     if self.actor_critic.is_recurrent:
       generator = self.storage.recurrent_mini_batch_generator(
@@ -301,6 +312,13 @@ class MjlabAmpPPO:
         )
         kl_mean = torch.mean(kl)
         mean_kl_divergence += kl_mean.item()
+        kl_checks += 1
+        if (
+          self.kl_early_stop
+          and self.desired_kl is not None
+          and kl_mean > self.desired_kl * self.kl_early_stop_multiplier
+        ):
+          break
         if self.desired_kl is not None and self.schedule == "adaptive":
           if kl_mean > self.desired_kl * 2.0:
             self.learning_rate = max(1e-5, self.learning_rate / 1.5)
@@ -344,11 +362,14 @@ class MjlabAmpPPO:
       else:
         value_loss = (returns_batch - value_batch).pow(2).mean()
 
-      loss = (
-        surrogate_loss
-        + self.value_loss_coef * value_loss
-        - self.entropy_coef * entropy_batch.mean()
-      )
+      if actor_frozen:
+        loss = self.value_loss_coef * value_loss
+      else:
+        loss = (
+          surrogate_loss
+          + self.value_loss_coef * value_loss
+          - self.entropy_coef * entropy_batch.mean()
+        )
 
       self.policy_optimizer.zero_grad()
       loss.backward()
@@ -364,13 +385,13 @@ class MjlabAmpPPO:
       mean_ratio_std += ratio.std(unbiased=False).item()
       mean_old_logp += old_logp.mean().item()
       mean_new_logp += new_logp.mean().item()
-      mean_actor_grad_norm += float(actor_grad_norm)
+      mean_actor_grad_norm += 0.0 if actor_frozen else float(actor_grad_norm)
       num_updates += 1
 
     return (
       mean_value_loss / max(1, num_updates),
       mean_surrogate_loss / max(1, num_updates),
-      mean_kl_divergence / max(1, num_updates),
+      mean_kl_divergence / max(1, kl_checks),
       mean_ratio / max(1, num_updates),
       mean_ratio_std / max(1, num_updates),
       mean_old_logp / max(1, num_updates),
@@ -382,6 +403,9 @@ class MjlabAmpPPO:
     self,
   ) -> tuple[float, float, float, float, float, float, float, float, float]:
     assert self.storage is not None
+    if self.freeze_discriminator:
+      return (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+
     mean_amp_loss = 0.0
     mean_grad_pen_loss = 0.0
     mean_policy_pred = 0.0
@@ -510,6 +534,7 @@ class MjlabAmpPPO:
       mean_expert_input_norm,
       mean_pair_distance,
     ) = self._update_discriminator()
+    self._policy_update_count += 1
     self.storage.clear()
     return (
       mean_value_loss,
