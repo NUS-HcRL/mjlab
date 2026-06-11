@@ -1,5 +1,6 @@
 """PM1 flat fall environment configurations."""
 
+from itertools import filterfalse
 from pathlib import Path
 
 from mjlab.asset_zoo.robots import (
@@ -68,7 +69,7 @@ def pm1_flat_falling_env_cfg(
   has_state_estimation: bool = True,
   play: bool = False,
   use_data_reset: bool = True,
-  use_data_reset_obs_history: bool = True,
+  use_data_reset_obs_history: bool = False,
   protective_finetune: bool = False,
 ) -> ManagerBasedRlEnvCfg:
   """Create PM1 flat terrain fall (joint-state tracking) configuration.
@@ -130,20 +131,31 @@ def pm1_flat_falling_env_cfg(
     body_names=("LINK_TORSO_YAW",),
   )
 
-  cfg.terminations["forbidden_body_contact_force"].params["body_names"] = (
+  forbidden_body_names = (
     "LINK_HEAD_YAW",
     "LINK_TORSO_YAW",
     "LINK_ELBOW_END_L",
     "LINK_ELBOW_END_R",
   )
-  cfg.terminations["forbidden_body_contact_force"].params["body_force_thresholds"] = {
-    "LINK_HEAD_YAW": 500.0,
-    "LINK_TORSO_YAW": 500.0,
-    "LINK_ELBOW_END_L": 500.0,
-    "LINK_ELBOW_END_R": 500.0,
+  forbidden_body_force_thresholds = {
+    "LINK_HEAD_YAW": 800.0,
+    "LINK_TORSO_YAW": 800.0,
+    "LINK_ELBOW_END_L": 800.0,
+    "LINK_ELBOW_END_R": 800.0,
     "LINK_SHOULDER_ROLL_L": 800.0,
     "LINK_SHOULDER_ROLL_R": 800.0,
   }
+  cfg.terminations["forbidden_body_contact_force"].params[
+    "body_names"
+  ] = forbidden_body_names
+  cfg.terminations["forbidden_body_contact_force"].params[
+    "body_force_thresholds"
+  ] = forbidden_body_force_thresholds
+  threshold_reward = cfg.rewards.get("threshold_contact_force")
+  if threshold_reward is not None:
+    threshold_reward.func.body_force_thresholds = {
+      name: forbidden_body_force_thresholds[name] for name in forbidden_body_names
+    }
 
   if protective_finetune:
     _freeze_curriculum_to_final_stage(cfg)
