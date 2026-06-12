@@ -315,14 +315,6 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
       ),
       weight=0.012, # 0.01
     ),
-    "threshold_contact_force": RewardTermCfg(
-      func=mdp.ThresholdContactForcePenalty(
-        sensor_name="body_contact_force",
-        body_force_thresholds={},  # Set per-robot with termination thresholds.
-        start_ratio=0.4,
-      ),
-      weight=-0.02,
-    ),
     "control_descent_speed": RewardTermCfg(
       func=mdp.control_descent_speed,
       weight=1,
@@ -472,7 +464,7 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
           },
           {
             "step": 16_000 * 32,
-            "data_probability": 0.50,
+            "data_probability": 0.30,
             "tilt_pose_range": {
               "x": (-1, 1),
               "y": (-1, 1),
