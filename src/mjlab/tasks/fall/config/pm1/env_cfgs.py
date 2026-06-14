@@ -69,7 +69,7 @@ def pm1_flat_falling_env_cfg(
   has_state_estimation: bool = True,
   play: bool = False,
   use_data_reset: bool = True,
-  use_data_reset_obs_history: bool = True,
+  use_data_reset_obs_history: bool = False,
   protective_finetune: bool = False,
 ) -> ManagerBasedRlEnvCfg:
   """Create PM1 flat terrain fall (joint-state tracking) configuration.
