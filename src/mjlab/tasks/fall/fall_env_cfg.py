@@ -302,8 +302,8 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
         high_weight=100.0,
         medium_weight=60.0,
         low_weight=0.5,
-        alpha=0.3,
-        squash_scale=0.01,
+        alpha=1.0,
+        squash_scale=0.0,
         tracked_body_names=(
           "LINK_HEAD_YAW",
           "LINK_TORSO_YAW",

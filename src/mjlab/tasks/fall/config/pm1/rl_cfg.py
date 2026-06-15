@@ -69,7 +69,7 @@ def pm1_falling_amp_runner_cfg() -> RslRlOnPolicyRunnerCfg:
       reward_mix_mode="ema_balance",
       reward_mix_ema_decay=0.99,
       reward_mix_scale_clip=(0.10, 4.0),
-      disc_reward_scale=2.0,
+      disc_reward_scale=1.0,
       disc_epochs=1,
       disc_batch_size_scale=2.0 / 32.0,
       disc_replay_samples=1000,
