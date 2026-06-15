@@ -151,6 +151,11 @@ def pm1_flat_falling_env_cfg(
   cfg.terminations["forbidden_body_contact_force"].params[
     "body_force_thresholds"
   ] = forbidden_body_force_thresholds
+  forbidden_force_reward = cfg.rewards.get("forbidden_contact_force_penalty")
+  if forbidden_force_reward is not None:
+    forbidden_force_reward.func.body_force_thresholds = {
+      name: forbidden_body_force_thresholds[name] for name in forbidden_body_names
+    }
 
   if protective_finetune:
     _freeze_curriculum_to_final_stage(cfg)

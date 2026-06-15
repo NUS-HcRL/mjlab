@@ -315,6 +315,17 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
       ),
       weight=0.012, # 0.01
     ),
+    "forbidden_contact_force_penalty": RewardTermCfg(
+      func=mdp.ForbiddenContactForcePenalty(
+        sensor_name="body_contact_force",
+        body_force_thresholds={},  # Set per-robot with termination thresholds.
+        start_ratio=0.4,
+        sharpness=12.0,
+        alpha=0.6,
+        squash_scale=2.0,
+      ),
+      weight=0.2,
+    ),
     "control_descent_speed": RewardTermCfg(
       func=mdp.control_descent_speed,
       weight=1,

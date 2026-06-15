@@ -705,6 +705,120 @@ class ReduceContactForceWeighted:
     return -penalty
 
 
+class ForbiddenContactForcePenalty:
+  """Penalize forbidden bodies as contact forces approach termination thresholds."""
+
+  def __init__(
+    self,
+    sensor_name: str,
+    body_force_thresholds: dict[str, float],
+    start_ratio: float = 0.4,
+    sharpness: float = 12.0,
+    alpha: float = 1.0,
+    squash_scale: float = 2.0,
+  ) -> None:
+    self.sensor_name = sensor_name
+    self.body_force_thresholds = body_force_thresholds
+    self.start_ratio = start_ratio
+    self.sharpness = sharpness
+    self.alpha = alpha
+    self.squash_scale = squash_scale
+    self._body_names: list[str] | None = None
+    self._body_indexes: list[int] | None = None
+    self._thresholds: torch.Tensor | None = None
+    self._metric_sums: dict[str, torch.Tensor] = {}
+    self._metric_steps: torch.Tensor | None = None
+
+  def _maybe_initialize(self, env: ManagerBasedRlEnv) -> bool:
+    sensor: ContactSensor = env.scene[self.sensor_name]
+    assert sensor.data.force is not None
+    sensor_body_names = _get_sensor_body_names(sensor)
+    if self._body_names is None:
+      sensor_body_name_set = set(sensor_body_names)
+      self._body_names = [
+        name for name in self.body_force_thresholds if name in sensor_body_name_set
+      ]
+      self._body_indexes = [sensor_body_names.index(name) for name in self._body_names]
+    if not self._body_names or self._body_indexes is None:
+      return False
+    if self._thresholds is None or self._thresholds.device != env.device:
+      self._thresholds = torch.tensor(
+        [self.body_force_thresholds[name] for name in self._body_names],
+        device=env.device,
+        dtype=sensor.data.force.dtype,
+      ).clamp_min(1.0)
+    if self._metric_steps is None or self._metric_steps.shape[0] != env.num_envs:
+      self._metric_steps = torch.zeros(env.num_envs, device=env.device)
+      self._metric_sums = {}
+    return True
+
+  def _accumulate(self, name: str, value: torch.Tensor) -> None:
+    if name not in self._metric_sums:
+      self._metric_sums[name] = torch.zeros_like(value)
+    self._metric_sums[name] += value
+
+  def reset(
+    self,
+    env_ids: torch.Tensor | slice | None = None,
+  ) -> dict[str, torch.Tensor]:
+    if self._metric_steps is None:
+      return {}
+    if env_ids is None:
+      env_ids = slice(None)
+    denom = self._metric_steps[env_ids].clamp_min(1.0)
+    extras = {
+      f"Metrics/forbidden_contact_force/{name}": (value[env_ids] / denom).mean()
+      for name, value in self._metric_sums.items()
+    }
+    self._metric_steps[env_ids] = 0.0
+    for value in self._metric_sums.values():
+      value[env_ids] = 0.0
+    return extras
+
+  def __call__(self, env: ManagerBasedRlEnv) -> torch.Tensor:
+    if not self._maybe_initialize(env):
+      return torch.zeros(env.num_envs, device=env.device)
+    assert self._body_names is not None
+    assert self._body_indexes is not None
+    assert self._thresholds is not None
+    assert self._metric_steps is not None
+    sensor: ContactSensor = env.scene[self.sensor_name]
+    assert sensor.data.force is not None
+    assert sensor.data.found is not None
+
+    indexes = torch.tensor(self._body_indexes, device=env.device, dtype=torch.long)
+    forces = sensor.data.force[:, indexes]
+    contact = (sensor.data.found[:, indexes] > 0).unsqueeze(-1)
+    force_norm = torch.norm(
+      torch.where(contact, forces, torch.zeros_like(forces)), dim=-1
+    )
+    force_ratio = force_norm / self._thresholds.unsqueeze(0)
+    excess = (
+      F.softplus((force_ratio - self.start_ratio) * self.sharpness)
+      / self.sharpness
+    )
+    excess_sq = excess.square()
+    average_term = excess_sq.mean(dim=-1)
+    peak_term = excess_sq.max(dim=-1).values
+    raw_penalty = average_term + self.alpha * peak_term
+    penalty = raw_penalty
+    if self.squash_scale > 0.0:
+      penalty = torch.log1p(self.squash_scale * penalty) / self.squash_scale
+
+    self._metric_steps += 1.0
+    self._accumulate("penalty", penalty)
+    self._accumulate("raw_penalty", raw_penalty)
+    self._accumulate("average_term", average_term)
+    self._accumulate("peak_term", peak_term)
+    self._accumulate("threshold_ratio_max", force_ratio.max(dim=-1).values)
+    for idx, body_name in enumerate(self._body_names):
+      self._accumulate(
+        f"{_body_log_name(body_name)}_threshold_ratio",
+        force_ratio[:, idx],
+      )
+    return -penalty
+
+
 def reduce_contact_force_weighted(
   env: ManagerBasedRlEnv,
   sensor_name: str,
