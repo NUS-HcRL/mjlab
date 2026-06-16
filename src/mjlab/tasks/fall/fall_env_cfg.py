@@ -324,7 +324,7 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
         alpha=0.6,
         squash_scale=2.0,
       ),
-      weight=0.4,
+      weight=1.0,
     ),
     "control_descent_speed": RewardTermCfg(
       func=mdp.control_descent_speed,
