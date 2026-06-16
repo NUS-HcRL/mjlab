@@ -302,8 +302,8 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
         high_weight=100.0,
         medium_weight=60.0,
         low_weight=0.5,
-        alpha=1.0,
-        squash_scale=0.0,
+        alpha=0.5,
+        squash_scale=0.02,
         tracked_body_names=(
           "LINK_HEAD_YAW",
           "LINK_TORSO_YAW",
@@ -324,7 +324,7 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
         alpha=0.6,
         squash_scale=2.0,
       ),
-      weight=0.2,
+      weight=0.4,
     ),
     "control_descent_speed": RewardTermCfg(
       func=mdp.control_descent_speed,
@@ -391,7 +391,7 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
         late_upper_penalty=0.2,
         early_upper_force_scale=0.0,
       ),
-      weight=0.03,
+      weight=0.08,
     ),
     "motor_overcurrent": RewardTermCfg(
       func=mdp.motor_overcurrent_penalty,
