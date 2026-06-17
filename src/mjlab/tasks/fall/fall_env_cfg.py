@@ -391,7 +391,7 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
         late_upper_penalty=0.2,
         early_upper_force_scale=0.0,
       ),
-      weight=0.08,
+      weight=0.05,
     ),
     "motor_overcurrent": RewardTermCfg(
       func=mdp.motor_overcurrent_penalty,
@@ -460,7 +460,7 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
           },
           {
             "step": 6_000 * 32,
-            "data_probability": 0.12,
+            "data_probability": 0.15,
             "tilt_pose_range": {
               "x": (-0.6, 0.6),
               "y": (-0.6, 0.6),
@@ -475,7 +475,7 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
           },
           {
             "step": 16_000 * 32,
-            "data_probability": 0.20,
+            "data_probability": 0.30,
             "tilt_pose_range": {
               "x": (-1, 1),
               "y": (-1, 1),
