@@ -33,6 +33,12 @@ class _OnnxMotionPolicyExporter(_OnnxPolicyExporter):
     super().__init__(actor_critic, normalizer, verbose)
     cmd = cast(MotionCommand, env.command_manager.get_term("motion"))
 
+    if cmd.num_motions > 1:
+      print(
+        "[WARN] ONNX export embeds the first motion file only. "
+        "For deployment with a specific motion, export using a single --motion-file."
+      )
+
     self.joint_pos = cmd.motion.joint_pos.to("cpu")
     self.joint_vel = cmd.motion.joint_vel.to("cpu")
     # qd_mask：仅乘参考关节速度表 joint_vel，不乘 joint_pos

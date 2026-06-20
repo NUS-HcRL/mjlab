@@ -1,6 +1,46 @@
 # 训练
 python -m mjlab.scripts.train Mjlab-Tracking-Flat-PM1 --motion-file motion_file/pm_fall4:v0/dance1_subject2_yaw0.npz --env.scene.num-envs 4096 --agent.max_iterations 10000
 
+## 多 motion 训练（目录下全部 npz，一个 policy mimic 所有动作）
+# --motion-file 可指向单个 .npz 或包含多个 .npz 的目录；目录下会加载全部 motion，每个 env reset 时随机采样一条。
+# 单条 motion 常用 10000 iter；78 条 dodge 建议 25000~30000（动作多、每条见到的样本更少，iter 需加大；不够可 resume 继续训）。
+
+# 单卡（默认 GPU 0）
+python -m mjlab.scripts.train Mjlab-Tracking-Flat-PM1 \
+  --motion-file motion_file/pm_fall4:v0/pm01_dodge_npz_aoqian \
+  --env.scene.num-envs 4096 \
+  --agent.max_iterations 25000
+
+# 4 卡（GPU 0~3；每张卡各跑 num-envs 路并行，总并行 env = 4 × num-envs）
+# 示例：4 × 512 = 2048 总 env，与单卡 4096 接近；OOM 可再降到 256~512
+MUJOCO_GL=egl python -m mjlab.scripts.train Mjlab-Tracking-Flat-PM1 \
+  --motion-file motion_file/pm_fall4:v0/pm01_dodge_npz_aoqian \
+  --gpu-ids 0 1 2 3 \
+  --env.scene.num-envs 512 \
+  --agent.max_iterations 25000
+
+# 8 卡 3090（每张卡各跑 num-envs 路并行，总并行 env = 8 × num-envs）
+# --gpu-ids all 等价于 0 1 2 3 4 5 6 7；若单卡 4096 会 OOM，可改为 512~1024（8 卡合计约 4096~8192 env）
+MUJOCO_GL=egl python -m mjlab.scripts.train Mjlab-Tracking-Flat-PM1 \
+  --motion-file motion_file/pm_fall4:v0/pm01_dodge_npz_aoqian \
+  --gpu-ids all \
+  --env.scene.num-envs 4096 \
+  --agent.max_iterations 25000
+
+## 多 motion 恢复训练
+python -m mjlab.scripts.train Mjlab-Tracking-Flat-PM1 \
+  --motion-file motion_file/pm_fall4:v0/pm01_dodge_npz_aoqian \
+  --gpu-ids all \
+  --env.scene.num-envs 4096 \
+  --agent.max_iterations 30000 \
+  --agent.resume True \
+  --wandb-run-path <entity>/mjlab/<run-id>
+
+## 多 motion 演示（play 时指定单条 npz 测某条 motion；或仍传目录看多 env 随机不同 motion）
+python -m mjlab.scripts.play Mjlab-Tracking-Flat-PM1 \
+  --motion-file motion_file/pm_fall4:v0/pm01_dodge_npz_aoqian/street_avoid_car_000_stand_R_001__A428.npz \
+  --wandb-run-path <entity>/mjlab/<run-id>
+
 ## 恢复训练 - 从 WandB 恢复（推荐）
 python -m mjlab.scripts.train Mjlab-Tracking-Flat-PM1 \
   --motion-file motion_file/pm_fall4:v0/dance1_subject2.npz \

@@ -209,14 +209,15 @@ class MotionCommand(CommandTerm):
     # 获取未来9帧的索引（从 t+1 到 t+9）
     future_steps = torch.arange(1, 10, device=self.time_steps.device).unsqueeze(0)  # (1, 9)
     future_indices = self.time_steps.unsqueeze(1) + future_steps  # (N, 9)
-    
-    # 处理边界情况：限制在有效范围内
-    max_valid_index = self.motion.time_step_total - 1
-    future_indices = torch.clamp(future_indices, 0, max_valid_index)
-    
-    # 获取未来9帧的关节位置和速度
-    future_pos_frames = self.motion.joint_pos[future_indices]  # (N, 9, num_joints)
-    future_vel_frames = self.motion.joint_vel[future_indices]  # (N, 9, num_joints)
+
+    if self.num_motions == 1:
+      max_valid_index = self.motion_lengths[0] - 1
+    else:
+      max_valid_index = self.motion_lengths[self.motion_ids] - 1
+    future_indices = torch.min(future_indices, max_valid_index.unsqueeze(1))
+
+    future_pos_frames = self._gather_for_envs_2d("joint_pos", future_indices)
+    future_vel_frames = self._gather_for_envs_2d("joint_vel", future_indices)
     
     # 按帧顺序堆叠：对每一帧，拼接 pos 和 vel，然后堆叠所有帧
     frame_data_list = []
@@ -230,11 +231,11 @@ class MotionCommand(CommandTerm):
 
   @property
   def joint_pos(self) -> torch.Tensor:
-    return self.motion.joint_pos[self.time_steps]
+    return self._gather_for_envs("joint_pos", self.time_steps)
 
   @property
   def joint_vel(self) -> torch.Tensor:
-    return self.motion.joint_vel[self.time_steps]
+    return self._gather_for_envs("joint_vel", self.time_steps)
 
   def apply_qd_mask_to_vel(self, joint_vel: torch.Tensor) -> torch.Tensor:
     """乘参考关节速度 ``qd``（即 ``joint_vel``）。不作用于关节位置 ``q`` / ``joint_pos``。"""
@@ -246,39 +247,48 @@ class MotionCommand(CommandTerm):
   @property
   def body_pos_w(self) -> torch.Tensor:
     return (
-      self.motion.body_pos_w[self.time_steps] + self._env.scene.env_origins[:, None, :]
+      self._gather_for_envs("body_pos_w", self.time_steps)
+      + self._env.scene.env_origins[:, None, :]
     )
 
   @property
   def body_quat_w(self) -> torch.Tensor:
-    return self.motion.body_quat_w[self.time_steps]
+    return self._gather_for_envs("body_quat_w", self.time_steps)
 
   @property
   def body_lin_vel_w(self) -> torch.Tensor:
-    return self.motion.body_lin_vel_w[self.time_steps]
+    return self._gather_for_envs("body_lin_vel_w", self.time_steps)
 
   @property
   def body_ang_vel_w(self) -> torch.Tensor:
-    return self.motion.body_ang_vel_w[self.time_steps]
+    return self._gather_for_envs("body_ang_vel_w", self.time_steps)
 
   @property
   def anchor_pos_w(self) -> torch.Tensor:
     return (
-      self.motion.body_pos_w[self.time_steps, self.motion_anchor_body_index]
+      self._gather_for_envs(
+        "body_pos_w", self.time_steps, body_index=self.motion_anchor_body_index
+      )
       + self._env.scene.env_origins
     )
 
   @property
   def anchor_quat_w(self) -> torch.Tensor:
-    return self.motion.body_quat_w[self.time_steps, self.motion_anchor_body_index]
+    return self._gather_for_envs(
+      "body_quat_w", self.time_steps, body_index=self.motion_anchor_body_index
+    )
 
   @property
   def anchor_lin_vel_w(self) -> torch.Tensor:
-    return self.motion.body_lin_vel_w[self.time_steps, self.motion_anchor_body_index]
+    return self._gather_for_envs(
+      "body_lin_vel_w", self.time_steps, body_index=self.motion_anchor_body_index
+    )
 
   @property
   def anchor_ang_vel_w(self) -> torch.Tensor:
-    return self.motion.body_ang_vel_w[self.time_steps, self.motion_anchor_body_index]
+    return self._gather_for_envs(
+      "body_ang_vel_w", self.time_steps, body_index=self.motion_anchor_body_index
+    )
 
   @property
   def robot_joint_pos(self) -> torch.Tensor:
@@ -355,60 +365,221 @@ class MotionCommand(CommandTerm):
       self.joint_vel - self.robot_joint_vel, dim=-1
     )
 
+  def _motion_lengths_for_envs(self, env_ids: torch.Tensor) -> torch.Tensor:
+    if self.num_motions == 1:
+      return self.motion_lengths[0].expand(len(env_ids))
+    return self.motion_lengths[self.motion_ids[env_ids]]
+
+  def _bin_counts_for_envs(self, env_ids: torch.Tensor) -> torch.Tensor:
+    if self.num_motions == 1:
+      return self.bin_counts[0].expand(len(env_ids))
+    return self.bin_counts[self.motion_ids[env_ids]]
+
+  def _sample_motion_ids(self, env_ids: torch.Tensor) -> None:
+    if self.num_motions > 1:
+      self.motion_ids[env_ids] = torch.randint(
+        0, self.num_motions, (len(env_ids),), device=self.device
+      )
+
+  def _gather_for_envs(
+    self,
+    attr: str,
+    time_steps: torch.Tensor,
+    body_index: int | None = None,
+  ) -> torch.Tensor:
+    if self.num_motions == 1:
+      data = getattr(self.motions[0], attr)
+      if body_index is not None:
+        return data[time_steps, body_index]
+      return data[time_steps]
+
+    data0 = getattr(self.motions[0], attr)
+    if body_index is not None:
+      sample = data0[time_steps[:1], body_index]
+    else:
+      sample = data0[time_steps[:1]]
+    out = torch.empty(
+      time_steps.shape[0], *sample.shape[1:], device=self.device, dtype=sample.dtype
+    )
+    for i, motion in enumerate(self.motions):
+      mask = self.motion_ids == i
+      if not mask.any():
+        continue
+      env_idx = mask.nonzero(as_tuple=True)[0]
+      data = getattr(motion, attr)
+      if body_index is not None:
+        out[env_idx] = data[time_steps[env_idx], body_index]
+      else:
+        out[env_idx] = data[time_steps[env_idx]]
+    return out
+
+  def clamp_frame_indices(self, indices: torch.Tensor) -> torch.Tensor:
+    """Clamp frame indices to the valid range for each environment."""
+    if self.num_motions == 1:
+      max_valid_index = self.motion_lengths[0] - 1
+      return torch.clamp(indices, 0, max_valid_index)
+    max_valid_index = self.motion_lengths[self.motion_ids] - 1
+    if indices.dim() == 1:
+      return torch.min(indices, max_valid_index)
+    return torch.min(indices, max_valid_index.unsqueeze(-1))
+
+  def _gather_for_envs_2d(
+    self,
+    attr: str,
+    indices: torch.Tensor,
+    body_index: int | None = None,
+  ) -> torch.Tensor:
+    """Gather motion data with per-env 2D indices (N, K)."""
+    if self.num_motions == 1:
+      data = getattr(self.motions[0], attr)
+      if body_index is not None:
+        return data[indices, body_index]
+      return data[indices]
+
+    data0 = getattr(self.motions[0], attr)
+    if body_index is not None:
+      sample = data0[indices[:1], body_index]
+    else:
+      sample = data0[indices[:1]]
+    out = torch.empty(
+      indices.shape[0], *sample.shape[1:], device=self.device, dtype=sample.dtype
+    )
+    for i, motion in enumerate(self.motions):
+      mask = self.motion_ids == i
+      if not mask.any():
+        continue
+      env_idx = mask.nonzero(as_tuple=True)[0]
+      data = getattr(motion, attr)
+      if body_index is not None:
+        out[env_idx] = data[indices[env_idx], body_index]
+      else:
+        out[env_idx] = data[indices[env_idx]]
+    return out
+
   def _adaptive_sampling(self, env_ids: torch.Tensor):
+    self._sample_motion_ids(env_ids)
+    n = len(env_ids)
+
     episode_failed = self._env.termination_manager.terminated[env_ids]
     if torch.any(episode_failed):
-      current_bin_index = torch.clamp(
-        (self.time_steps * self.bin_count) // max(self.motion.time_step_total, 1),
-        0,
-        self.bin_count - 1,
+      failed_env_ids = env_ids[episode_failed]
+      if self.num_motions == 1:
+        current_bin_index = torch.clamp(
+          (self.time_steps[failed_env_ids] * self.bin_count)
+          // max(self.motion_lengths[0].item(), 1),
+          0,
+          self.bin_count - 1,
+        )
+        self._current_bin_failed[:] = torch.bincount(
+          current_bin_index, minlength=self.bin_count
+        )
+      else:
+        self._current_bin_failed.zero_()
+        for motion_id in range(self.num_motions):
+          motion_mask = self.motion_ids[failed_env_ids] == motion_id
+          if not motion_mask.any():
+            continue
+          failed = failed_env_ids[motion_mask]
+          bin_count = int(self.bin_counts[motion_id].item())
+          length = max(int(self.motion_lengths[motion_id].item()), 1)
+          bin_idx = torch.clamp(
+            (self.time_steps[failed] * bin_count) // length, 0, bin_count - 1
+          )
+          self._current_bin_failed[motion_id, :bin_count] += torch.bincount(
+            bin_idx, minlength=bin_count
+          )
+
+    sampled_bins = torch.zeros(n, dtype=torch.long, device=self.device)
+    lengths = self._motion_lengths_for_envs(env_ids)
+    bin_counts = self._bin_counts_for_envs(env_ids)
+
+    if self.num_motions == 1:
+      bin_count = self.bin_count
+      sampling_probabilities = (
+        self.bin_failed_count + self.cfg.adaptive_uniform_ratio / float(bin_count)
       )
-      fail_bins = current_bin_index[env_ids][episode_failed]
-      self._current_bin_failed[:] = torch.bincount(fail_bins, minlength=self.bin_count)
+      sampling_probabilities = torch.nn.functional.pad(
+        sampling_probabilities.unsqueeze(0).unsqueeze(0),
+        (0, self.cfg.adaptive_kernel_size - 1),
+        mode="replicate",
+      )
+      sampling_probabilities = torch.nn.functional.conv1d(
+        sampling_probabilities, self.kernel.view(1, 1, -1)
+      ).view(-1)
+      sampling_probabilities = sampling_probabilities / sampling_probabilities.sum()
+      sampled_bins = torch.multinomial(sampling_probabilities, n, replacement=True)
+      H = -(sampling_probabilities * (sampling_probabilities + 1e-12).log()).sum()
+      H_norm = H / math.log(bin_count)
+      pmax, imax = sampling_probabilities.max(dim=0)
+      top1_bin = imax.float() / bin_count
+    else:
+      entropy_sum = 0.0
+      pmax = torch.tensor(0.0, device=self.device)
+      top1_bin = torch.tensor(0.5, device=self.device)
+      for motion_id in range(self.num_motions):
+        env_mask = self.motion_ids[env_ids] == motion_id
+        if not env_mask.any():
+          continue
+        local_n = int(env_mask.sum().item())
+        bin_count = int(self.bin_counts[motion_id].item())
+        sampling_probabilities = (
+          self.bin_failed_count[motion_id, :bin_count]
+          + self.cfg.adaptive_uniform_ratio / float(bin_count)
+        )
+        sampling_probabilities = torch.nn.functional.pad(
+          sampling_probabilities.unsqueeze(0).unsqueeze(0),
+          (0, self.cfg.adaptive_kernel_size - 1),
+          mode="replicate",
+        )
+        sampling_probabilities = torch.nn.functional.conv1d(
+          sampling_probabilities, self.kernel.view(1, 1, -1)
+        ).view(-1)
+        sampling_probabilities = sampling_probabilities / sampling_probabilities.sum()
+        local_bins = torch.multinomial(sampling_probabilities, local_n, replacement=True)
+        sampled_bins[env_mask] = local_bins
+        H = -(sampling_probabilities * (sampling_probabilities + 1e-12).log()).sum()
+        entropy_sum += (H / math.log(bin_count)) * local_n
+        local_pmax, local_imax = sampling_probabilities.max(dim=0)
+        if local_pmax > pmax:
+          pmax = local_pmax
+          top1_bin = local_imax.float() / bin_count
+      H_norm = entropy_sum / n
 
-    # Sample.
-    sampling_probabilities = (
-      self.bin_failed_count + self.cfg.adaptive_uniform_ratio / float(self.bin_count)
-    )
-    sampling_probabilities = torch.nn.functional.pad(
-      sampling_probabilities.unsqueeze(0).unsqueeze(0),
-      (0, self.cfg.adaptive_kernel_size - 1),  # Non-causal kernel
-      mode="replicate",
-    )
-    sampling_probabilities = torch.nn.functional.conv1d(
-      sampling_probabilities, self.kernel.view(1, 1, -1)
-    ).view(-1)
-
-    sampling_probabilities = sampling_probabilities / sampling_probabilities.sum()
-
-    sampled_bins = torch.multinomial(
-      sampling_probabilities, len(env_ids), replacement=True
-    )
     self.time_steps[env_ids] = (
-      (sampled_bins + sample_uniform(0.0, 1.0, (len(env_ids),), device=self.device))
-      / self.bin_count
-      * (self.motion.time_step_total - 1)
+      (sampled_bins + sample_uniform(0.0, 1.0, (n,), device=self.device))
+      / bin_counts.float()
+      * (lengths - 1).float()
     ).long()
 
-    # Update metrics.
-    H = -(sampling_probabilities * (sampling_probabilities + 1e-12).log()).sum()
-    H_norm = H / math.log(self.bin_count)
-    pmax, imax = sampling_probabilities.max(dim=0)
     self.metrics["sampling_entropy"][:] = H_norm
     self.metrics["sampling_top1_prob"][:] = pmax
-    self.metrics["sampling_top1_bin"][:] = imax.float() / self.bin_count
+    self.metrics["sampling_top1_bin"][:] = top1_bin
 
   def _uniform_sampling(self, env_ids: torch.Tensor):
-    self.time_steps[env_ids] = torch.randint(
-      0, self.motion.time_step_total, (len(env_ids),), device=self.device
-    )
-    self.metrics["sampling_entropy"][:] = 1.0  # Maximum entropy for uniform.
+    self._sample_motion_ids(env_ids)
+    n = len(env_ids)
+    if self.num_motions == 1:
+      self.time_steps[env_ids] = torch.randint(
+        0, self.motion_lengths[0].item(), (n,), device=self.device
+      )
+    else:
+      for motion_id in range(self.num_motions):
+        env_mask = self.motion_ids[env_ids] == motion_id
+        if not env_mask.any():
+          continue
+        local_env_ids = env_ids[env_mask]
+        max_t = int(self.motion_lengths[motion_id].item())
+        self.time_steps[local_env_ids] = torch.randint(
+          0, max_t, (len(local_env_ids),), device=self.device
+        )
+    self.metrics["sampling_entropy"][:] = 1.0
     self.metrics["sampling_top1_prob"][:] = 1.0 / self.bin_count
-    self.metrics["sampling_top1_bin"][:] = 0.5  # No specific bin preference.
+    self.metrics["sampling_top1_bin"][:] = 0.5
 
   def _resample_command(self, env_ids: torch.Tensor):
     if self.cfg.sampling_mode == "start":
       self.time_steps[env_ids] = 0
+      self._sample_motion_ids(env_ids)
     elif self.cfg.sampling_mode == "uniform":
       self._uniform_sampling(env_ids)
     else:
@@ -476,7 +647,11 @@ class MotionCommand(CommandTerm):
 
   def _update_command(self):
     self.time_steps += 1
-    env_ids = torch.where(self.time_steps >= self.motion.time_step_total)[0]
+    if self.num_motions == 1:
+      motion_end = self.time_steps >= self.motion_lengths[0]
+    else:
+      motion_end = self.time_steps >= self.motion_lengths[self.motion_ids]
+    env_ids = torch.where(motion_end)[0]
     if env_ids.numel() > 0:
       self._resample_command(env_ids)
 
@@ -655,6 +830,11 @@ class MotionCommand(CommandTerm):
 
 @dataclass(kw_only=True)
 class MotionCommandCfg(CommandTermCfg):
+  """Motion tracking command configuration.
+
+  ``motion_file`` may be a single ``.npz`` path or a directory containing multiple
+  ``.npz`` files (all motions are sampled uniformly per environment at reset).
+  """
   motion_file: str
   anchor_body_name: str
   body_names: tuple[str, ...]

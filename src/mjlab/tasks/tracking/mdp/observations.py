@@ -136,14 +136,12 @@ def reference_torso_ori_multi_frame(
   """
   command = cast(MotionCommand, env.command_manager.get_term(command_name))
   t = command.time_steps  # (N,)
-  T = command.motion.time_step_total
-  # future indices t+1..t+horizon
-  device = t.device
-  future_steps = torch.arange(1, horizon + 1, device=device).unsqueeze(0)  # (1,H)
-  idx = torch.clamp(t.unsqueeze(1) + future_steps, 0, T - 1)  # (N,H)
-  # Gather future quats at anchor body index; command.motion.body_quat_w: (T, B, 4)
+  future_steps = torch.arange(1, horizon + 1, device=t.device).unsqueeze(0)  # (1,H)
+  idx = command.clamp_frame_indices(t.unsqueeze(1) + future_steps)  # (N,H)
   anchor_idx = command.motion_anchor_body_index
-  future_quat = command.motion.body_quat_w[idx, anchor_idx]  # (N,H,4)
+  future_quat = command._gather_for_envs_2d(
+    "body_quat_w", idx, body_index=anchor_idx
+  )  # (N,H,4)
   # Normalize quaternion to avoid invalid rotation matrices
   norm = torch.linalg.vector_norm(future_quat, dim=-1, keepdim=True)
   future_quat = future_quat / (norm + 1e-9)
@@ -166,14 +164,12 @@ def reference_anchor_future_xy_10(
   """参考全局 anchor 未来10帧的 XY 位置（不含当前帧），输出 [N, 10*2]."""
   command = cast(MotionCommand, env.command_manager.get_term(command_name))
   t = command.time_steps  # [N]
-  T = command.motion.time_step_total
-  steps = torch.arange(1, 11, device=t.device).unsqueeze(
-    0
-  )  # [1,10] -> future 10 frames
-  idx = torch.clamp(t.unsqueeze(1) + steps, 0, T - 1)  # [N,10]
-  # 取参考的 anchor body 在全局的位姿序列；body_pos_w: (T,B,3)
+  steps = torch.arange(1, 11, device=t.device).unsqueeze(0)  # [1,10]
+  idx = command.clamp_frame_indices(t.unsqueeze(1) + steps)  # [N,10]
   anchor_idx = command.motion_anchor_body_index
-  pos_w = command.motion.body_pos_w[idx, anchor_idx, :]  # [N,10,3]
+  pos_w = command._gather_for_envs_2d(
+    "body_pos_w", idx, body_index=anchor_idx
+  )  # [N,10,3]
   xy = pos_w[..., :2]  # [N,10,2]
   return xy.reshape(env.num_envs, -1)
 
@@ -187,13 +183,12 @@ def reference_anchor_ori_current_future_10(
   """
   command = cast(MotionCommand, env.command_manager.get_term(command_name))
   t = command.time_steps  # [N]
-  T = command.motion.time_step_total
-  # 当前帧+未来9帧 = 10帧
   steps = torch.arange(0, 10, device=t.device).unsqueeze(0)  # [1,10]
-  idx = torch.clamp(t.unsqueeze(1) + steps, 0, T - 1)  # [N,10]
-  # 取参考的 anchor body 在全局的姿态序列；body_quat_w: (T,B,4)
+  idx = command.clamp_frame_indices(t.unsqueeze(1) + steps)  # [N,10]
   anchor_idx = command.motion_anchor_body_index
-  future_quat = command.motion.body_quat_w[idx, anchor_idx]  # [N,10,4]
+  future_quat = command._gather_for_envs_2d(
+    "body_quat_w", idx, body_index=anchor_idx
+  )  # [N,10,4]
   # 归一化四元数，避免无效的旋转矩阵
   norm = torch.linalg.vector_norm(future_quat, dim=-1, keepdim=True)
   future_quat = future_quat / (norm + 1e-9)
@@ -211,13 +206,12 @@ def reference_anchor_quat_current_future_10(
   """
   command = cast(MotionCommand, env.command_manager.get_term(command_name))
   t = command.time_steps  # [N]
-  T = command.motion.time_step_total
-  # 当前帧+未来9帧 = 10帧
   steps = torch.arange(0, 10, device=t.device).unsqueeze(0)  # [1,10]
-  idx = torch.clamp(t.unsqueeze(1) + steps, 0, T - 1)  # [N,10]
-  # 取参考的 anchor body 在全局的姿态四元数序列；body_quat_w: (T,B,4)
+  idx = command.clamp_frame_indices(t.unsqueeze(1) + steps)  # [N,10]
   anchor_idx = command.motion_anchor_body_index
-  quat = command.motion.body_quat_w[idx, anchor_idx]  # [N,10,4]
+  quat = command._gather_for_envs_2d(
+    "body_quat_w", idx, body_index=anchor_idx
+  )  # [N,10,4]
   # 归一化四元数，保证数值稳定
   norm = torch.linalg.vector_norm(quat, dim=-1, keepdim=True)
   quat = quat / (norm + 1e-9)
@@ -241,11 +235,10 @@ def reference_feet_rel_pos_current_future_10(
   except ValueError:
     return torch.zeros((env.num_envs, 10 * 3), device=device)
   t = command.time_steps  # [N]
-  T = command.motion.time_step_total
   steps = torch.arange(0, 10, device=t.device).unsqueeze(0)  # [1,10]
-  idx = torch.clamp(t.unsqueeze(1) + steps, 0, T - 1)  # [N,10]
-  pL = command.motion.body_pos_w[idx, li, :]  # [N,10,3]
-  pR = command.motion.body_pos_w[idx, ri, :]  # [N,10,3]
+  idx = command.clamp_frame_indices(t.unsqueeze(1) + steps)  # [N,10]
+  pL = command._gather_for_envs_2d("body_pos_w", idx, body_index=li)  # [N,10,3]
+  pR = command._gather_for_envs_2d("body_pos_w", idx, body_index=ri)  # [N,10,3]
   v = pL - pR  # [N,10,3]
   return v.reshape(env.num_envs, -1)
 
@@ -407,16 +400,13 @@ def future_frames_generated_commands_with_scale(
 
   # 获取未来9帧的索引
   future_steps = torch.arange(1, 10, device=command.time_steps.device).unsqueeze(0)
-  future_indices = command.time_steps.unsqueeze(1) + future_steps
+  future_indices = command.clamp_frame_indices(
+    command.time_steps.unsqueeze(1) + future_steps
+  )
 
-  # 处理边界情况
-  max_valid_index = command.motion.time_step_total - 1
-  future_indices = torch.clamp(future_indices, 0, max_valid_index)
-
-  # 获取未来9帧的关节位置和速度
-  future_pos_frames = command.motion.joint_pos[future_indices] * pos_scale
+  future_pos_frames = command._gather_for_envs_2d("joint_pos", future_indices) * pos_scale
   future_vel_frames = command.apply_qd_mask_to_vel(
-    command.motion.joint_vel[future_indices] * vel_scale
+    command._gather_for_envs_2d("joint_vel", future_indices) * vel_scale
   )
 
   # 按帧顺序堆叠
@@ -509,16 +499,16 @@ def base_height_diff_10frames(env: ManagerBasedRlEnv, command_name: str) -> torc
   # Get current frame and future 4 frames (total 5 frames)
   current_time = command.time_steps  # [N]
   future_steps = torch.arange(0, 10, device=current_time.device).unsqueeze(0)  # [1, 5] (0,1,2,3,4)
-  frame_indices = current_time.unsqueeze(1) + future_steps  # [N, 5]
+  frame_indices = command.clamp_frame_indices(
+    current_time.unsqueeze(1) + future_steps
+  )  # [N, 10]
 
-  # Handle boundary: clamp to valid indices
-  max_valid_index = command.motion.time_step_total - 1
-  frame_indices = torch.clamp(frame_indices, 0, max_valid_index)
-
-  # Get reference base positions for these frames
-  # motion.body_pos_w shape: [total_frames, num_bodies, 3]
-  # Need to add environment origin offset to match robot coordinates
-  ref_body_pos_w = command.motion.body_pos_w[frame_indices, command.motion_anchor_body_index] + command._env.scene.env_origins.unsqueeze(1)  # [N, 5, 3]
+  ref_body_pos_w = (
+    command._gather_for_envs_2d(
+      "body_pos_w", frame_indices, body_index=command.motion_anchor_body_index
+    )
+    + command._env.scene.env_origins.unsqueeze(1)
+  )  # [N, 10, 3]
   ref_base_z = ref_body_pos_w[:, :, 2]  # [N, 5]
   height_diffs = ref_base_z 
   # Compute differences: robot_z - reference_z

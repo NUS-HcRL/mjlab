@@ -17,6 +17,7 @@ from mjlab.envs import ManagerBasedRlEnv
 from mjlab.rl import RslRlVecEnvWrapper
 from mjlab.tasks.registry import list_tasks, load_env_cfg, load_rl_cfg
 from mjlab.tasks.tracking.mdp import MotionCommandCfg
+from mjlab.tasks.tracking.mdp.commands import resolve_motion_paths
 from mjlab.tasks.tracking.rl import MotionTrackingOnPolicyRunner
 from mjlab.utils.os import get_wandb_checkpoint_path
 from mjlab.utils.torch import configure_torch_backends
@@ -291,8 +292,16 @@ def run_play(task: str, cfg: PlayConfig):
       motion_cmd.motion_file = str(Path(artifact.download()) / "motion.npz")
     else:
       if cfg.motion_file is not None:
-        print(f"[INFO]: Using motion file from CLI: {cfg.motion_file}")
-        motion_cmd.motion_file = cfg.motion_file
+        motion_path = Path(cfg.motion_file)
+        motion_cmd.motion_file = str(motion_path.resolve())
+        motion_paths = resolve_motion_paths(motion_cmd.motion_file)
+        if len(motion_paths) == 1:
+          print(f"[INFO]: Using motion file from CLI: {motion_paths[0]}")
+        else:
+          print(
+            f"[INFO]: Using {len(motion_paths)} motion files from directory: "
+            f"{motion_cmd.motion_file}"
+          )
       else:
         import wandb
 

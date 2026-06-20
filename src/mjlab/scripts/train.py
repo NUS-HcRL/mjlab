@@ -15,6 +15,7 @@ from mjlab.envs import ManagerBasedRlEnv, ManagerBasedRlEnvCfg
 from mjlab.rl import RslRlOnPolicyRunnerCfg, RslRlVecEnvWrapper
 from mjlab.tasks.registry import list_tasks, load_env_cfg, load_rl_cfg, load_runner_cls
 from mjlab.tasks.tracking.mdp import MotionCommandCfg
+from mjlab.tasks.tracking.mdp.commands import resolve_motion_paths
 from mjlab.utils.gpu import select_gpus
 from mjlab.utils.os import dump_yaml, get_checkpoint_path, get_wandb_checkpoint_path
 from mjlab.utils.torch import configure_torch_backends
@@ -85,17 +86,24 @@ def run_train(task_id: str, cfg: TrainConfig, log_dir: Path) -> None:
     motion_cmd = cfg.env.commands["motion"]
     assert isinstance(motion_cmd, MotionCommandCfg)
 
-    # If motion_file is provided, use it directly.
+    # If motion_file is provided, use it directly (single npz or directory of npz files).
     if cfg.motion_file is not None:
       motion_file_path = Path(cfg.motion_file)
       if not motion_file_path.exists():
         raise FileNotFoundError(
-          f"Motion file not found: {motion_file_path}\n"
-          f"Please provide a valid path to the motion.npz file."
+          f"Motion path not found: {motion_file_path}\n"
+          f"Please provide a valid path to a motion.npz file or a directory of npz files."
         )
       motion_cmd.motion_file = str(motion_file_path.resolve())
       if rank == 0:
-        print(f"[INFO] Using motion file from CLI: {motion_cmd.motion_file}")
+        motion_paths = resolve_motion_paths(motion_cmd.motion_file)
+        if len(motion_paths) == 1:
+          print(f"[INFO] Using motion file from CLI: {motion_paths[0]}")
+        else:
+          print(
+            f"[INFO] Using {len(motion_paths)} motion files from directory: "
+            f"{motion_cmd.motion_file}"
+          )
     elif cfg.registry_name is not None:
       # Download from wandb registry.
       # Check if the registry name includes alias, if not, append ":latest".
@@ -133,7 +141,7 @@ def run_train(task_id: str, cfg: TrainConfig, log_dir: Path) -> None:
       raise ValueError(
         "For tracking tasks, you must provide either:\n"
         "  --registry-name <wandb-registry-path>  (to download from wandb)\n"
-        "  --motion-file <path-to-motion.npz>     (to use a local file)"
+        "  --motion-file <path-to-motion.npz-or-directory>  (local single file or npz directory)"
       )
 
   # Enable NaN guard if requested.
