@@ -70,6 +70,21 @@ class MotionLoader:
     return self._body_ang_vel_w[:, self._body_indexes]
 
 
+def resolve_motion_paths(motion_file: str) -> list[str]:
+  """Resolve motion_file to a list of npz paths (single file or directory)."""
+  path = Path(motion_file)
+  if not path.exists():
+    raise FileNotFoundError(f"Motion path not found: {path}")
+  if path.is_dir():
+    files = sorted(path.glob("*.npz"))
+    if not files:
+      raise ValueError(f"No .npz files found in directory: {path}")
+    return [str(f.resolve()) for f in files]
+  if path.is_file():
+    return [str(path.resolve())]
+  raise ValueError(f"Motion path is not a file or directory: {path}")
+
+
 class MotionCommand(CommandTerm):
   cfg: MotionCommandCfg
   _env: ManagerBasedRlEnv
@@ -88,16 +103,30 @@ class MotionCommand(CommandTerm):
       device=self.device,
     )
 
-    # Check and resample motion file if fps doesn't match
-    motion_file = self._check_and_resample_fps(cfg.motion_file, env.step_dt)
-
-    self.motion = MotionLoader(
-      motion_file, self.body_indexes, device=self.device
+    motion_paths = [
+      self._check_and_resample_fps(p, env.step_dt)
+      for p in resolve_motion_paths(cfg.motion_file)
+    ]
+    self.motions = [
+      MotionLoader(p, self.body_indexes, device=self.device) for p in motion_paths
+    ]
+    self.num_motions = len(self.motions)
+    self.motion = self.motions[0]
+    self.motion_lengths = torch.tensor(
+      [m.time_step_total for m in self.motions], device=self.device, dtype=torch.long
     )
+    self.motion_ids = torch.zeros(self.num_envs, dtype=torch.long, device=self.device)
+
+    if self.num_motions > 1:
+      print(
+        f"[INFO] Loaded {self.num_motions} motion files "
+        f"(frame lengths: min={self.motion_lengths.min().item()}, "
+        f"max={self.motion_lengths.max().item()})"
+      )
 
     self._qd_mask: torch.Tensor | None = None
     if cfg.qd_mask is not None:
-      nj = self.motion.joint_pos.shape[1]
+      nj = self.motions[0].joint_pos.shape[1]
       if len(cfg.qd_mask) != nj:
         raise ValueError(
           f"qd_mask length ({len(cfg.qd_mask)}) must equal num joints ({nj}) "
@@ -116,13 +145,30 @@ class MotionCommand(CommandTerm):
     )
     self.body_quat_relative_w[:, :, 0] = 1.0
 
-    self.bin_count = int(self.motion.time_step_total // (1 / env.step_dt)) + 1
-    self.bin_failed_count = torch.zeros(
-      self.bin_count, dtype=torch.float, device=self.device
+    step_dt_inv = 1 / env.step_dt
+    self.bin_counts = torch.tensor(
+      [int(m.time_step_total // step_dt_inv) + 1 for m in self.motions],
+      device=self.device,
+      dtype=torch.long,
     )
-    self._current_bin_failed = torch.zeros(
-      self.bin_count, dtype=torch.float, device=self.device
+    self.max_bin_count = int(self.bin_counts.max().item())
+    self.bin_count = (
+      self.max_bin_count if self.num_motions > 1 else int(self.bin_counts[0].item())
     )
+    if self.num_motions == 1:
+      self.bin_failed_count = torch.zeros(
+        self.bin_count, dtype=torch.float, device=self.device
+      )
+      self._current_bin_failed = torch.zeros(
+        self.bin_count, dtype=torch.float, device=self.device
+      )
+    else:
+      self.bin_failed_count = torch.zeros(
+        self.num_motions, self.max_bin_count, dtype=torch.float, device=self.device
+      )
+      self._current_bin_failed = torch.zeros(
+        self.num_motions, self.max_bin_count, dtype=torch.float, device=self.device
+      )
     self.kernel = torch.tensor(
       [self.cfg.adaptive_lambda**i for i in range(self.cfg.adaptive_kernel_size)],
       device=self.device,
