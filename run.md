@@ -16,7 +16,7 @@ python -m mjlab.scripts.train Mjlab-Tracking-Flat-PM1 \
 MUJOCO_GL=egl python -m mjlab.scripts.train Mjlab-Tracking-Flat-PM1 \
   --motion-file motion_file/pm_fall4:v0/pm01_dodge_npz_aoqian \
   --gpu-ids 0 1 2 3 \
-  --env.scene.num-envs 512 \
+  --env.scene.num-envs 1024 \
   --agent.max_iterations 25000
 
 # 8 卡 3090（每张卡各跑 num-envs 路并行，总并行 env = 8 × num-envs）

@@ -210,11 +210,7 @@ class MotionCommand(CommandTerm):
     future_steps = torch.arange(1, 10, device=self.time_steps.device).unsqueeze(0)  # (1, 9)
     future_indices = self.time_steps.unsqueeze(1) + future_steps  # (N, 9)
 
-    if self.num_motions == 1:
-      max_valid_index = self.motion_lengths[0] - 1
-    else:
-      max_valid_index = self.motion_lengths[self.motion_ids] - 1
-    future_indices = torch.min(future_indices, max_valid_index.unsqueeze(1))
+    future_indices = self.clamp_frame_indices(future_indices)
 
     future_pos_frames = self._gather_for_envs_2d("joint_pos", future_indices)
     future_vel_frames = self._gather_for_envs_2d("joint_vel", future_indices)
@@ -387,6 +383,7 @@ class MotionCommand(CommandTerm):
     time_steps: torch.Tensor,
     body_index: int | None = None,
   ) -> torch.Tensor:
+    time_steps = self.clamp_frame_indices(time_steps)
     if self.num_motions == 1:
       data = getattr(self.motions[0], attr)
       if body_index is not None:
@@ -395,9 +392,9 @@ class MotionCommand(CommandTerm):
 
     data0 = getattr(self.motions[0], attr)
     if body_index is not None:
-      sample = data0[time_steps[:1], body_index]
+      sample = data0[:1, body_index]
     else:
-      sample = data0[time_steps[:1]]
+      sample = data0[:1]
     out = torch.empty(
       time_steps.shape[0], *sample.shape[1:], device=self.device, dtype=sample.dtype
     )
@@ -407,21 +404,24 @@ class MotionCommand(CommandTerm):
         continue
       env_idx = mask.nonzero(as_tuple=True)[0]
       data = getattr(motion, attr)
+      max_index = int(self.motion_lengths[i].item()) - 1
+      local_steps = torch.clamp(time_steps[env_idx], 0, max_index)
       if body_index is not None:
-        out[env_idx] = data[time_steps[env_idx], body_index]
+        out[env_idx] = data[local_steps, body_index]
       else:
-        out[env_idx] = data[time_steps[env_idx]]
+        out[env_idx] = data[local_steps]
     return out
 
   def clamp_frame_indices(self, indices: torch.Tensor) -> torch.Tensor:
     """Clamp frame indices to the valid range for each environment."""
+    indices = torch.clamp(indices, min=0)
     if self.num_motions == 1:
-      max_valid_index = self.motion_lengths[0] - 1
-      return torch.clamp(indices, 0, max_valid_index)
+      max_valid_index = int(self.motion_lengths[0].item()) - 1
+      return torch.clamp(indices, max=max_valid_index)
     max_valid_index = self.motion_lengths[self.motion_ids] - 1
     if indices.dim() == 1:
-      return torch.min(indices, max_valid_index)
-    return torch.min(indices, max_valid_index.unsqueeze(-1))
+      return torch.minimum(indices, max_valid_index)
+    return torch.minimum(indices, max_valid_index.unsqueeze(-1))
 
   def _gather_for_envs_2d(
     self,
@@ -430,6 +430,7 @@ class MotionCommand(CommandTerm):
     body_index: int | None = None,
   ) -> torch.Tensor:
     """Gather motion data with per-env 2D indices (N, K)."""
+    indices = self.clamp_frame_indices(indices)
     if self.num_motions == 1:
       data = getattr(self.motions[0], attr)
       if body_index is not None:
@@ -437,10 +438,11 @@ class MotionCommand(CommandTerm):
       return data[indices]
 
     data0 = getattr(self.motions[0], attr)
+    safe_indices = indices[:1].clamp(0, data0.shape[0] - 1)
     if body_index is not None:
-      sample = data0[indices[:1], body_index]
+      sample = data0[safe_indices, body_index]
     else:
-      sample = data0[indices[:1]]
+      sample = data0[safe_indices]
     out = torch.empty(
       indices.shape[0], *sample.shape[1:], device=self.device, dtype=sample.dtype
     )
@@ -450,10 +452,12 @@ class MotionCommand(CommandTerm):
         continue
       env_idx = mask.nonzero(as_tuple=True)[0]
       data = getattr(motion, attr)
+      max_index = int(self.motion_lengths[i].item()) - 1
+      local_indices = torch.clamp(indices[env_idx], 0, max_index)
       if body_index is not None:
-        out[env_idx] = data[indices[env_idx], body_index]
+        out[env_idx] = data[local_indices, body_index]
       else:
-        out[env_idx] = data[indices[env_idx]]
+        out[env_idx] = data[local_indices]
     return out
 
   def _adaptive_sampling(self, env_ids: torch.Tensor):
@@ -550,6 +554,11 @@ class MotionCommand(CommandTerm):
       / bin_counts.float()
       * (lengths - 1).float()
     ).long()
+    self.time_steps[env_ids] = torch.clamp(self.time_steps[env_ids], min=0)
+    self.time_steps[env_ids] = torch.minimum(
+      self.time_steps[env_ids],
+      self.motion_lengths[self.motion_ids[env_ids]] - 1,
+    )
 
     self.metrics["sampling_entropy"][:] = H_norm
     self.metrics["sampling_top1_prob"][:] = pmax
@@ -654,6 +663,7 @@ class MotionCommand(CommandTerm):
     env_ids = torch.where(motion_end)[0]
     if env_ids.numel() > 0:
       self._resample_command(env_ids)
+    self.time_steps = self.clamp_frame_indices(self.time_steps)
 
     anchor_pos_w_repeat = self.anchor_pos_w[:, None, :].repeat(
       1, len(self.cfg.body_names), 1
