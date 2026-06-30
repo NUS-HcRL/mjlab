@@ -41,6 +41,18 @@ python -m mjlab.scripts.play Mjlab-Tracking-Flat-PM1 \
   --motion-file motion_file/pm_fall4:v0/pm01_dodge_npz_aoqian/street_avoid_car_000_stand_R_001__A428.npz \
   --wandb-run-path <entity>/mjlab/<run-id>
 
+## 测某一条 dodge
+python -m mjlab.scripts.play Mjlab-Tracking-Flat-PM1 \
+  --wandb-run-path 1205492990-nus/mjlab/x8r42v0r \
+  --motion-file motion_file/pm_fall4:v0/pm01_dodge_npz_aoqian/street_avoid_car_000_stand_R_001__A428.npz
+
+## 看多条 dodge 
+python -m mjlab.scripts.play Mjlab-Tracking-Flat-PM1 \
+  --wandb-run-path 1205492990-nus/mjlab/x8r42v0r \
+  --motion-file motion_file/pm_fall4:v0/pm01_dodge_npz_aoqian \
+  --num-envs 16 \
+  --viewer viser
+
 ## 恢复训练 - 从 WandB 恢复（推荐）
 python -m mjlab.scripts.train Mjlab-Tracking-Flat-PM1 \
   --motion-file motion_file/pm_fall4:v0/dance1_subject2.npz \
