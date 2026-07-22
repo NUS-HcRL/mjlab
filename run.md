@@ -97,6 +97,43 @@ bash run_train_sequential.sh
 
 脚本默认任一任务失败即退出。若希望某个失败后仍继续跑后面的，注释掉脚本中的 `set -e` 即可。
 
+## KAPP armlink 八方向顺序训练
+
+**armlink 是不用护具的**，训练时需同时满足：
+
+1. 命令行加 `--use-protector-map False`（脚本里已写）。
+2. 修改 `src/mjlab/asset_zoo/robots/engineai_pm01/pm01_8.py`：把护具用的 `SOLREF_CONTACT_SOFT_6mm` / `SOLIMP_CONTACT_SOFT_6mm` 改成**非护具**参数（与 `SOLREF_CONTACT_DEFAULT` / `SOLIMP_CONTACT_DEFAULT` 一致，或按无护具碰撞模型调整膝、肘等 link 的 solref/solimp）。
+
+KAPP 原始 NPZ 的 `body_names` 第 0 项是 `world`（30 bodies），mjlab 训练加载器按数组下标取 body、不读 `body_names`，不能直接用于训练。需先用 `fix_kapp_npz` 去掉 `world`，得到 29 bodies 的标准格式。
+
+### 转换 KAPP NPZ（fix_kapp_npz）
+
+```bash
+# 批量转换 kapp_armlink_8dir 下全部 npz
+python -m mjlab.scripts.fix_kapp_npz \
+  motion_file/pm_fall4:v0/kapp_armlink_8dir/*.npz \
+  --output-dir motion_file/pm_fall4:v0/kapp_armlink_8dir_mjlab
+
+# 单个文件
+python -m mjlab.scripts.fix_kapp_npz \
+  motion_file/pm_fall4:v0/kapp_armlink_8dir/kapp_armlink_forward_row0753.npz \
+  --output-dir motion_file/pm_fall4:v0/kapp_armlink_8dir_mjlab
+```
+
+转换后保留原文件其余字段，仅对 `body_pos_w` / `body_quat_w` / `body_lin_vel_w` / `body_ang_vel_w` 和 `body_names` 去掉索引 0 的 `world`。KAPP 导出已是 50 Hz，无需再 resample。
+
+### 顺序训练脚本
+
+使用 `run_train_sequential_kapp_armlink_8dir.sh`：8 个方向依次训练，motion 路径指向 `kapp_armlink_8dir_mjlab/`。脚本内已设 `--use-protector-map False`，以及跌倒接触较多时的 `--env.sim.nconmax 96 --env.sim.njmax 640`。
+
+```bash
+cd mjlab
+pip install -e .   # 切换分支或改代码后需重装
+./run_train_sequential_kapp_armlink_8dir.sh
+```
+
+可在脚本中改 `MOTIONS` 列表或 `COMMON_ARGS`（如 `num-envs`、迭代次数）。
+
 ## 恢复训练 - 从 WandB 恢复（推荐）
 python -m mjlab.scripts.train Mjlab-Tracking-Flat-PM1 \
   --motion-file motion_file/pm_fall4:v0/motion.npz \
@@ -168,6 +205,19 @@ python -m mjlab.scripts.play Mjlab-Tracking-Flat-PM1 --motion-file motion_file/p
 python -m mjlab.scripts.play Mjlab-Tracking-Flat-PM1 --motion-file motion_file/pm_fall4:v0/RightBack_1_converted_50fps.npz --wandb-run-path 1205492990-nus/mjlab/hsbeg4f9
 
 
+
+## pt to onnx
+```bash
+# checkpoint 同目录有 params/env.yaml 时会自动读 motion_file
+python -m mjlab.scripts.export_pt_to_onnx Mjlab-Tracking-Flat-PM1 \
+  --checkpoint logs/rsl_rl/pm1_tracking/2026-06-04_15-21-12/model_17000.pt
+
+# 手动指定 motion / 输出路径
+python -m mjlab.scripts.export_pt_to_onnx Mjlab-Tracking-Flat-PM1 \
+  --checkpoint logs/rsl_rl/pm1_tracking/2026-06-04_15-21-12/model_17000.pt \
+  --motion-file motion_file/pm_fall4:v0/toFront_1_converted_50fps.npz \
+  --output-file logs/rsl_rl/pm1_tracking/2026-06-04_15-21-12/model_17000.onnx
+```
 
 ## MNN 模型转换
 
@@ -266,6 +316,16 @@ python -m mjlab.scripts.pt_to_mnn_batch --input-dir motion_file/pm_fall4:v0/pt -
 ```
 
 ## NPZ 文件工具
+
+### KAPP NPZ 转 mjlab 格式（去掉 world body）
+
+KAPP 导出的 npz 含 30 个 body（首项为 `world`），训练前需转换，详见上文「KAPP armlink 八方向顺序训练」。
+
+```bash
+python -m mjlab.scripts.fix_kapp_npz \
+  motion_file/pm_fall4:v0/kapp_armlink_8dir/*.npz \
+  --output-dir motion_file/pm_fall4:v0/kapp_armlink_8dir_mjlab
+```
 
 ### 查看 NPZ 文件 FPS
 
