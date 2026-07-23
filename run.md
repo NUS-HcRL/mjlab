@@ -124,15 +124,18 @@ python -m mjlab.scripts.fix_kapp_npz \
 
 ### 顺序训练脚本
 
-使用 `run_train_sequential_kapp_armlink_8dir.sh`：8 个方向依次训练，motion 路径指向 `kapp_armlink_8dir_mjlab/`。脚本内已设 `--use-protector-map False`，以及跌倒接触较多时的 `--env.sim.nconmax 96 --env.sim.njmax 640`。
+使用 `run_train_sequential_kapp_armlink_8dir.sh`：8 个方向依次训练，motion 路径指向 `kapp_armlink_8dir_mjlab/`。脚本内已设 `--use-protector-map False`、`--env.episode-length-s 2.0`（KAPP 轨迹约 1.2s，timeout 不宜仍用默认 10s），以及跌倒接触较多时的 `--env.sim.nconmax 96 --env.sim.njmax 640`。
 
 ```bash
 cd mjlab
 pip install -e .   # 切换分支或改代码后需重装
 ./run_train_sequential_kapp_armlink_8dir.sh
+
+# 仅训剩余方向（例：forward_right / backward_left / backward_right）
+./run_train_sequential_kapp_armlink_8dir_remaining.sh
 ```
 
-可在脚本中改 `MOTIONS` 列表或 `COMMON_ARGS`（如 `num-envs`、迭代次数）。
+可在脚本中改 `MOTIONS` 列表或 `COMMON_ARGS`（如 `num-envs`、迭代次数、`episode-length-s`）。
 
 ## 恢复训练 - 从 WandB 恢复（推荐）
 python -m mjlab.scripts.train Mjlab-Tracking-Flat-PM1 \
