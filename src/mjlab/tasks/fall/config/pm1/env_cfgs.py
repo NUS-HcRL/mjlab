@@ -52,17 +52,24 @@ def _freeze_curriculum_to_final_stage(cfg: ManagerBasedRlEnvCfg) -> None:
 def _pm1_fall_reset_motion_csv_paths(
   use_data_reset_obs_history: bool,
 ) -> tuple[str, ...]:
-  """Paths to reset CSV files, selecting legacy or obs-history data.
+  """Paths to reset CSV files, selecting all data or obs-history-only data.
 
   Rows from all files are concatenated into one reset pool (see fall ``mdp.events``).
   """
   # env_cfgs.py -> pm1 -> config -> fall -> tasks -> mjlab -> src -> repo root
   repo_root = Path(__file__).resolve().parents[6]
-  data_dir = "amp_fall" if use_data_reset_obs_history else "amp_pm1_fall"
-  d = repo_root / "data" / data_dir
-  if not d.is_dir():
-    return ()
-  return tuple(str(p) for p in sorted(d.glob("*.csv")))
+  data_dir_names = (
+    ("fall_with_obs_history",)
+    if use_data_reset_obs_history
+    else ("fall_with_obs_history", "fall_without_obs_history")
+  )
+  paths: list[str] = []
+  for data_dir_name in data_dir_names:
+    data_dir = repo_root / "data" / data_dir_name
+    if not data_dir.is_dir():
+      continue
+    paths.extend(str(p) for p in sorted(data_dir.glob("*.csv")))
+  return tuple(paths)
 
 
 def pm1_flat_falling_env_cfg(
@@ -138,10 +145,10 @@ def pm1_flat_falling_env_cfg(
     "LINK_ELBOW_END_R",
   )
   forbidden_body_force_thresholds = {
-    "LINK_HEAD_YAW": 500.0,
+    "LINK_HEAD_YAW": 200.0,
     "LINK_TORSO_YAW": 500.0,
-    "LINK_ELBOW_END_L": 500.0,
-    "LINK_ELBOW_END_R": 500.0,
+    "LINK_ELBOW_END_L": 200.0,
+    "LINK_ELBOW_END_R": 200.0,
     "LINK_SHOULDER_ROLL_L": 800.0,
     "LINK_SHOULDER_ROLL_R": 800.0,
   }
@@ -195,7 +202,7 @@ def pm1_flat_falling_env_cfg(
   cfg.events["reset_base"].params[
     "use_data_reset_obs_history"
   ] = use_data_reset_obs_history
-  # cfg.events["reset_base"].params["motion_files"] = ("data/amp_pm1_fall/policy_switch_walking_combined.csv",)
+  # cfg.events["reset_base"].params["motion_files"] = ("data/fall_with_obs_history/policy_switch_walking_combined.csv",)
   cfg.events["reset_base"].params["data_root_body_name"] = "LINK_BASE"
   if not use_data_reset and cfg.curriculum is not None and "reset_init" in cfg.curriculum:
     init_stages = cfg.curriculum["reset_init"].params["init_stages"]
@@ -206,13 +213,13 @@ def pm1_flat_falling_env_cfg(
   if cfg.amp is not None:
     cfg.amp.motion_file = [
       "motion_file/pm_fall4:v0/Back_3_converted.npz",
-      "motion_file/pm_fall4:v0/Front_1_converted_50fps.npz",
+      "motion_file/pm_fall4:v0/Front_3_converted.npz",
       "motion_file/pm_fall4:v0/Left_1_converted_50fps.npz",
       "motion_file/pm_fall4:v0/Right_1_converted_50fps.npz",
-      "motion_file/pm_fall4:v0/LeftFront_2_converted.npz",
-      "motion_file/pm_fall4:v0/LeftBack_2_converted.npz",
-      "motion_file/pm_fall4:v0/RightFront_2_converted.npz",
-      "motion_file/pm_fall4:v0/RightBack_2_converted.npz",
+      "motion_file/pm_fall4:v0/LeftFront_3_converted.npz",
+      "motion_file/pm_fall4:v0/LeftBack_3_converted.npz",
+      "motion_file/pm_fall4:v0/RightFront_3_converted.npz",
+      "motion_file/pm_fall4:v0/RightBack_3_converted.npz",
     ]
 
   # PM1 IMU 传感器名与 G1 不同：imu_angular_velocity / imu_link_linear_velocity

@@ -24,12 +24,24 @@ _MOTION_RESET_POOL_CACHE: dict[
   tuple[tuple[str, ...], int, str, int], dict[str, torch.Tensor]
 ] = {}
 _LAST_RESET_DATA_MASK_ATTR = "_fall_last_reset_data_mask"
+_LAST_RESET_DATA_DIRECTION_ATTR = "_fall_last_reset_data_direction_w"
 _FORCE_PULSE_STEPS_LEFT_ATTR = "_fall_force_pulse_steps_left"
 _FORCE_PULSE_COOLDOWN_STEPS_LEFT_ATTR = "_fall_force_pulse_cooldown_steps_left"
 _DATA_RESET_OBS_PENDING_ATTR = "_fall_data_reset_obs_pending"
 _DATA_RESET_POOL_ROW_ATTR = "_fall_data_reset_pool_row"
 _DATA_RESET_MOTION_POOL_ATTR = "_fall_data_reset_motion_pool"
 _PRE_SWITCH_HISTORY_SUFFIXES = ("m4", "m3", "m2", "m1")
+_INV_SQRT_2 = 2.0**-0.5
+_DIRECTION_VECTORS_W = {
+  "forward": (1.0, 0.0, 0.0),
+  "forward_left": (_INV_SQRT_2, _INV_SQRT_2, 0.0),
+  "left": (0.0, 1.0, 0.0),
+  "backward_left": (-_INV_SQRT_2, _INV_SQRT_2, 0.0),
+  "backward": (-1.0, 0.0, 0.0),
+  "backward_right": (-_INV_SQRT_2, -_INV_SQRT_2, 0.0),
+  "right": (0.0, -1.0, 0.0),
+  "forward_right": (_INV_SQRT_2, -_INV_SQRT_2, 0.0),
+}
 
 
 def _normalize_quat(quat: torch.Tensor) -> torch.Tensor:
@@ -44,6 +56,28 @@ def _csv_body_idx(asset_body_idx: int) -> int:
 
 def _has_pre_switch_history_columns(fieldnames: Sequence[str]) -> bool:
   return "pre_m4_joint_pos_0" in fieldnames
+
+
+def _load_direction_vectors_w(
+  rows: list[dict[str, str]], fieldnames: Sequence[str], device: str
+) -> torch.Tensor:
+  """Convert CSV fall directions to unit vectors in the world XY frame."""
+  if "direction" not in fieldnames:
+    return torch.zeros((len(rows), 3), dtype=torch.float32, device=device)
+
+  vectors = []
+  unknown_directions = set()
+  for row in rows:
+    direction = row.get("direction", "").strip().lower()
+    vector = _DIRECTION_VECTORS_W.get(direction)
+    if vector is None:
+      unknown_directions.add(direction or "<empty>")
+      vector = (0.0, 0.0, 0.0)
+    vectors.append(vector)
+  if unknown_directions:
+    unknown = ", ".join(sorted(unknown_directions))
+    raise ValueError(f"Reset motion CSV has unsupported directions: {unknown}")
+  return torch.tensor(vectors, dtype=torch.float32, device=device)
 
 
 def _pre_switch_joint_cols(prefix: str, num_joints: int, kind: str) -> list[str]:
@@ -269,6 +303,7 @@ def _load_motion_reset_csv(
     ),
     "joint_pos": joint_pos,
     "joint_vel": joint_vel,
+    "push_direction_w": _load_direction_vectors_w(rows, fieldnames, device),
     "has_pre_history": torch.zeros(num_rows, dtype=torch.bool, device=device),
     "pre_joint_pos": pre_joint_pos,
     "pre_joint_vel": torch.zeros_like(pre_joint_pos),
@@ -344,6 +379,9 @@ def _get_motion_reset_pool(
     "root_state": torch.cat([motion["root_state"] for motion in datasets], dim=0),
     "joint_pos": torch.cat([motion["joint_pos"] for motion in datasets], dim=0),
     "joint_vel": torch.cat([motion["joint_vel"] for motion in datasets], dim=0),
+    "push_direction_w": torch.cat(
+      [motion["push_direction_w"] for motion in datasets], dim=0
+    ),
     "has_pre_history": torch.cat(
       [motion["has_pre_history"] for motion in datasets], dim=0
     ),
@@ -461,7 +499,7 @@ def _sample_motion_states(
   data_joint_velocity_range: tuple[float, float],
   asset_name: str,
   use_data_reset_obs_history: bool,
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
   root_ids, _ = asset.find_bodies((data_root_body_name,), preserve_order=True)
   if not root_ids:
     raise ValueError(
@@ -562,7 +600,8 @@ def _sample_motion_states(
       pool_row_ids=state_ids,
       motion_pool=motion_pool,
     )
-  return root_state, joint_pos, joint_vel
+  push_direction_w = motion_pool["push_direction_w"][state_ids]
+  return root_state, joint_pos, joint_vel, push_direction_w
 
 
 def _init_data_reset_obs_history_state(env: ManagerBasedRlEnv) -> None:
@@ -749,6 +788,16 @@ def reset_root_state_mixed(
 
   reset_data_mask = torch.zeros(env.num_envs, dtype=torch.bool, device=env.device)
   setattr(env, _LAST_RESET_DATA_MASK_ATTR, reset_data_mask)
+  reset_data_direction_w = getattr(env, _LAST_RESET_DATA_DIRECTION_ATTR, None)
+  if (
+    not isinstance(reset_data_direction_w, torch.Tensor)
+    or reset_data_direction_w.shape != (env.num_envs, 3)
+  ):
+    reset_data_direction_w = torch.zeros(
+      (env.num_envs, 3), dtype=torch.float32, device=env.device
+    )
+    setattr(env, _LAST_RESET_DATA_DIRECTION_ATTR, reset_data_direction_w)
+  reset_data_direction_w[env_ids] = 0.0
   _init_data_reset_obs_history_state(env)
   pending = getattr(env, _DATA_RESET_OBS_PENDING_ATTR)
   pool_row = getattr(env, _DATA_RESET_POOL_ROW_ATTR)
@@ -780,7 +829,7 @@ def reset_root_state_mixed(
   data_env_ids = env_ids[use_data]
   if data_env_ids.numel() > 0:
     reset_data_mask[data_env_ids] = True
-    data_root, data_joint_pos, data_joint_vel = _sample_motion_states(
+    data_root, data_joint_pos, data_joint_vel, data_direction_w = _sample_motion_states(
       env=env,
       asset=asset,
       env_ids=data_env_ids,
@@ -793,6 +842,7 @@ def reset_root_state_mixed(
       asset_name=asset_cfg.name,
       use_data_reset_obs_history=use_data_reset_obs_history,
     )
+    reset_data_direction_w[data_env_ids] = data_direction_w
     _write_state_and_forward(
       env, asset, data_env_ids, data_root, data_joint_pos, data_joint_vel
     )
@@ -868,6 +918,65 @@ def apply_external_force_torque_axiswise(
   )
 
 
+def apply_external_force_directional(
+  env: ManagerBasedRlEnv,
+  env_ids: torch.Tensor,
+  direction_w: torch.Tensor,
+  magnitude_range: tuple[float, float],
+  asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
+) -> None:
+  """Apply a horizontal force along a per-environment world-frame direction."""
+  if env_ids.numel() == 0:
+    return
+  asset: Entity = env.scene[asset_cfg.name]
+  num_bodies = (
+    len(asset_cfg.body_ids)
+    if isinstance(asset_cfg.body_ids, list)
+    else asset.num_bodies
+  )
+  magnitude_low = float(min(magnitude_range))
+  magnitude_high = float(max(magnitude_range))
+  magnitudes = sample_uniform(
+    magnitude_low,
+    magnitude_high,
+    (len(env_ids), 1),
+    device=env.device,
+  )
+  directions = direction_w.to(device=env.device, dtype=torch.float32)
+  directions = directions / torch.linalg.vector_norm(
+    directions, dim=-1, keepdim=True
+  ).clamp_min(1e-6)
+  forces = (
+    (directions * magnitudes).unsqueeze(1).expand(-1, num_bodies, -1).contiguous()
+  )
+  torques = torch.zeros_like(forces)
+  asset.write_external_wrench_to_sim(
+    forces, torques, env_ids=env_ids, body_ids=asset_cfg.body_ids
+  )
+
+
+def _sample_pulse_duration_steps(
+  device: str,
+  duration_steps: int | None,
+  duration_steps_range: tuple[int, int] | None,
+) -> int:
+  if duration_steps is not None:
+    return int(duration_steps)
+  if duration_steps_range is None:
+    return 1
+  duration_low_raw, duration_high_raw = duration_steps_range
+  duration_low = int(min(duration_low_raw, duration_high_raw))
+  duration_high = int(max(duration_low_raw, duration_high_raw))
+  return int(
+    torch.randint(
+      low=duration_low,
+      high=duration_high + 1,
+      size=(1,),
+      device=device,
+    ).item()
+  )
+
+
 def apply_external_force_torque_axiswise_pulse(
   env: ManagerBasedRlEnv,
   env_ids: torch.Tensor | None = None,
@@ -876,6 +985,9 @@ def apply_external_force_torque_axiswise_pulse(
   duration_steps: int | None = None,
   duration_steps_range: tuple[int, int] | None = None,
   pulse_probability: float = 1.0,
+  data_direction_force_magnitude_range: tuple[float, float] | None = None,
+  data_direction_force_probability: float = 1.0,
+  data_direction_duration_steps_range: tuple[int, int] | None = None,
   cooldown_steps: int = 0,
   preserve_data_reset_states: bool = True,
   asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
@@ -884,7 +996,13 @@ def apply_external_force_torque_axiswise_pulse(
 
   This function is designed to be called every env step via one interval event:
   1) tick and clear expired pulses;
-  2) detect envs just reset in this step and start new pulses.
+  2) detect envs just reset in this step and start new pulses;
+  3) optionally apply a small direction-aligned pulse to CSV data resets.
+
+  CSV directions are stored in the world frame (forward=+X, left=+Y). When
+  ``data_direction_force_magnitude_range`` is set, data resets use that pulse
+  instead of the random axiswise force. Missing direction metadata disables the
+  data-reset pulse for the affected environment.
   """
   steps_left = getattr(env, _FORCE_PULSE_STEPS_LEFT_ATTR, None)
   if steps_left is None or not isinstance(steps_left, torch.Tensor):
@@ -920,23 +1038,16 @@ def apply_external_force_torque_axiswise_pulse(
   setattr(env, _FORCE_PULSE_COOLDOWN_STEPS_LEFT_ATTR, cooldown_left)
 
   # 2) Start pulses for envs that were just reset in current env step.
-  if duration_steps is None:
-    if duration_steps_range is None:
-      duration_steps = 1
-    else:
-      duration_low_raw, duration_high_raw = duration_steps_range
-      duration_low = int(min(duration_low_raw, duration_high_raw))
-      duration_high = int(max(duration_low_raw, duration_high_raw))
-      duration_steps = int(
-        torch.randint(
-          low=duration_low,
-          high=duration_high + 1,
-          size=(1,),
-          device=env.device,
-        ).item()
-      )
-  if duration_steps <= 0:
-    return
+  regular_duration_steps = _sample_pulse_duration_steps(
+    env.device, duration_steps, duration_steps_range
+  )
+  data_duration_steps = 0
+  if data_direction_force_magnitude_range is not None:
+    data_duration_steps = _sample_pulse_duration_steps(
+      env.device,
+      None,
+      data_direction_duration_steps_range or duration_steps_range,
+    )
   just_reset_env_ids = torch.nonzero(
     env.episode_length_buf == 0, as_tuple=False
   ).squeeze(-1)
@@ -948,38 +1059,73 @@ def apply_external_force_torque_axiswise_pulse(
     torque_axis_range = {}
 
   steps_left[just_reset_env_ids] = 0
-  target_env_ids = just_reset_env_ids
-  if preserve_data_reset_states:
-    data_mask = getattr(env, _LAST_RESET_DATA_MASK_ATTR, None)
-    if data_mask is not None:
-      data_mask = data_mask.to(env.device).bool()
-      target_env_ids = just_reset_env_ids[~data_mask[just_reset_env_ids]]
-  if target_env_ids.numel() == 0:
-    return
-  if pulse_probability <= 0.0:
-    return
-  if pulse_probability < 1.0:
-    trigger_mask = torch.rand(len(target_env_ids), device=env.device) < float(
-      pulse_probability
-    )
-    target_env_ids = target_env_ids[trigger_mask]
-    if target_env_ids.numel() == 0:
-      return
-  if cooldown_steps > 0:
-    target_env_ids = target_env_ids[cooldown_left[target_env_ids] <= 0]
-    if target_env_ids.numel() == 0:
-      return
+  data_mask = getattr(env, _LAST_RESET_DATA_MASK_ATTR, None)
+  if not isinstance(data_mask, torch.Tensor) or data_mask.shape != (env.num_envs,):
+    data_mask = torch.zeros(env.num_envs, dtype=torch.bool, device=env.device)
+  else:
+    data_mask = data_mask.to(env.device).bool()
 
-  apply_external_force_torque_axiswise(
+  def _filter_targets(targets: torch.Tensor, probability: float) -> torch.Tensor:
+    if targets.numel() == 0 or probability <= 0.0:
+      return targets[:0]
+    if probability < 1.0:
+      targets = targets[
+        torch.rand(len(targets), device=env.device) < float(probability)
+      ]
+    if cooldown_steps > 0 and targets.numel() > 0:
+      targets = targets[cooldown_left[targets] <= 0]
+    return targets
+
+  separate_data_pulse = data_direction_force_magnitude_range is not None
+  if preserve_data_reset_states or separate_data_pulse:
+    regular_target_env_ids = just_reset_env_ids[~data_mask[just_reset_env_ids]]
+  else:
+    regular_target_env_ids = just_reset_env_ids
+  regular_target_env_ids = _filter_targets(
+    regular_target_env_ids, pulse_probability
+  )
+  if regular_duration_steps > 0 and regular_target_env_ids.numel() > 0:
+    apply_external_force_torque_axiswise(
+      env=env,
+      env_ids=regular_target_env_ids,
+      force_axis_range=force_axis_range,
+      torque_axis_range=torque_axis_range,
+      asset_cfg=asset_cfg,
+    )
+    steps_left[regular_target_env_ids] = regular_duration_steps
+    if cooldown_steps > 0:
+      cooldown_left[regular_target_env_ids] = int(cooldown_steps)
+
+  if not separate_data_pulse or data_duration_steps <= 0:
+    return
+  data_direction_w = getattr(env, _LAST_RESET_DATA_DIRECTION_ATTR, None)
+  if (
+    not isinstance(data_direction_w, torch.Tensor)
+    or data_direction_w.shape != (env.num_envs, 3)
+  ):
+    return
+  data_target_env_ids = just_reset_env_ids[data_mask[just_reset_env_ids]]
+  if data_target_env_ids.numel() == 0:
+    return
+  valid_direction = (
+    torch.linalg.vector_norm(data_direction_w[data_target_env_ids], dim=-1) > 1e-6
+  )
+  data_target_env_ids = data_target_env_ids[valid_direction]
+  data_target_env_ids = _filter_targets(
+    data_target_env_ids, data_direction_force_probability
+  )
+  if data_target_env_ids.numel() == 0:
+    return
+  apply_external_force_directional(
     env=env,
-    env_ids=target_env_ids,
-    force_axis_range=force_axis_range,
-    torque_axis_range=torque_axis_range,
+    env_ids=data_target_env_ids,
+    direction_w=data_direction_w[data_target_env_ids],
+    magnitude_range=data_direction_force_magnitude_range,
     asset_cfg=asset_cfg,
   )
-  steps_left[target_env_ids] = int(duration_steps)
+  steps_left[data_target_env_ids] = data_duration_steps
   if cooldown_steps > 0:
-    cooldown_left[target_env_ids] = int(cooldown_steps)
+    cooldown_left[data_target_env_ids] = int(cooldown_steps)
 
 
 def randomize_gravity(
