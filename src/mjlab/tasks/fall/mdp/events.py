@@ -19,9 +19,12 @@ if TYPE_CHECKING:
   from mjlab.envs import ManagerBasedRlEnv
 
 _DEFAULT_ASSET_CFG = SceneEntityCfg("robot")
-_MOTION_RESET_CACHE: dict[tuple[str, int, str, int], dict[str, torch.Tensor]] = {}
+_MOTION_RESET_CACHE: dict[
+  tuple[str, int, str, int, float | None, float | None], dict[str, torch.Tensor]
+] = {}
 _MOTION_RESET_POOL_CACHE: dict[
-  tuple[tuple[str, ...], int, str, int], dict[str, torch.Tensor]
+  tuple[tuple[str, ...], int, str, int, float | None, float | None],
+  dict[str, torch.Tensor],
 ] = {}
 _LAST_RESET_DATA_MASK_ATTR = "_fall_last_reset_data_mask"
 _LAST_RESET_DATA_DIRECTION_ATTR = "_fall_last_reset_data_direction_w"
@@ -214,6 +217,8 @@ def _load_motion_reset_csv(
   root_body_idx: int,
   device: str,
   expected_num_joints: int,
+  min_root_height: float | None = None,
+  max_abs_joint_velocity: float | None = None,
 ) -> dict[str, torch.Tensor]:
   with open(path, newline="", encoding="utf-8") as csv_file:
     reader = csv.DictReader(csv_file)
@@ -328,6 +333,31 @@ def _load_motion_reset_csv(
   )
   if pre_history is not None:
     dataset.update(pre_history)
+
+  valid_rows = torch.isfinite(dataset["root_state"]).all(dim=-1)
+  valid_rows &= torch.isfinite(dataset["joint_pos"]).all(dim=-1)
+  valid_rows &= torch.isfinite(dataset["joint_vel"]).all(dim=-1)
+  if min_root_height is not None and not _root_state_is_placeholder(
+    dataset["root_state"]
+  ):
+    valid_rows &= dataset["root_state"][:, 2] >= float(min_root_height)
+  if max_abs_joint_velocity is not None:
+    valid_rows &= (
+      dataset["joint_vel"].abs().amax(dim=-1)
+      <= float(max_abs_joint_velocity)
+    )
+
+  num_filtered = int((~valid_rows).sum().item())
+  if num_filtered:
+    num_total = int(valid_rows.numel())
+    if not valid_rows.any().item():
+      raise ValueError(
+        f"Reset motion '{path}' has no rows remaining after safety filtering."
+      )
+    print(
+      f"[INFO] Filtered {num_filtered}/{num_total} unsafe reset rows from '{path}'."
+    )
+    dataset = {name: values[valid_rows] for name, values in dataset.items()}
   return dataset
 
 
@@ -336,8 +366,17 @@ def _load_motion_reset_file(
   root_body_idx: int,
   device: str,
   expected_num_joints: int,
+  min_root_height: float | None = None,
+  max_abs_joint_velocity: float | None = None,
 ) -> dict[str, torch.Tensor]:
-  cache_key = (path, root_body_idx, device, expected_num_joints)
+  cache_key = (
+    path,
+    root_body_idx,
+    device,
+    expected_num_joints,
+    min_root_height,
+    max_abs_joint_velocity,
+  )
   cached = _MOTION_RESET_CACHE.get(cache_key)
   if cached is not None:
     return cached
@@ -347,6 +386,8 @@ def _load_motion_reset_file(
     root_body_idx=root_body_idx,
     device=device,
     expected_num_joints=expected_num_joints,
+    min_root_height=min_root_height,
+    max_abs_joint_velocity=max_abs_joint_velocity,
   )
   _MOTION_RESET_CACHE[cache_key] = cached
   return cached
@@ -357,8 +398,17 @@ def _get_motion_reset_pool(
   root_body_idx: int,
   device: str,
   expected_num_joints: int,
+  min_root_height: float | None = None,
+  max_abs_joint_velocity: float | None = None,
 ) -> dict[str, torch.Tensor]:
-  cache_key = (tuple(motion_files), root_body_idx, device, expected_num_joints)
+  cache_key = (
+    tuple(motion_files),
+    root_body_idx,
+    device,
+    expected_num_joints,
+    min_root_height,
+    max_abs_joint_velocity,
+  )
   cached = _MOTION_RESET_POOL_CACHE.get(cache_key)
   if cached is not None:
     return cached
@@ -369,6 +419,8 @@ def _get_motion_reset_pool(
       root_body_idx=root_body_idx,
       device=device,
       expected_num_joints=expected_num_joints,
+      min_root_height=min_root_height,
+      max_abs_joint_velocity=max_abs_joint_velocity,
     )
     for path in motion_files
   ]
@@ -487,6 +539,18 @@ def _sample_tilt_states(
   return root_state, joint_pos, joint_vel
 
 
+def _zero_low_clearance_pose_tilt(
+  pose_samples: torch.Tensor,
+  root_height: torch.Tensor,
+  low_clearance_height: float | None,
+) -> None:
+  """Suppress extra roll/pitch noise for reset states already near the ground."""
+  if low_clearance_height is None:
+    return
+  low_clearance = root_height < float(low_clearance_height)
+  pose_samples[low_clearance, 3:5] = 0.0
+
+
 def _sample_motion_states(
   env: ManagerBasedRlEnv,
   asset: Entity,
@@ -497,6 +561,9 @@ def _sample_motion_states(
   data_velocity_range: dict[str, tuple[float, float]] | None,
   data_joint_position_range: tuple[float, float],
   data_joint_velocity_range: tuple[float, float],
+  data_min_root_height: float | None,
+  data_max_abs_joint_velocity: float | None,
+  data_low_clearance_height: float | None,
   asset_name: str,
   use_data_reset_obs_history: bool,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
@@ -513,6 +580,8 @@ def _sample_motion_states(
     root_body_idx=root_body_idx,
     device=env.device,
     expected_num_joints=asset.num_joints,
+    min_root_height=data_min_root_height,
+    max_abs_joint_velocity=data_max_abs_joint_velocity,
   )
   root_state_pool = motion_pool["root_state"]
   joint_pos_pool = motion_pool["joint_pos"]
@@ -550,6 +619,10 @@ def _sample_motion_states(
   )
   pose_samples = sample_uniform(
     pose_ranges[:, 0], pose_ranges[:, 1], (len(env_ids), 6), device=env.device
+  )
+  root_height = root_state[:, 2] - env.scene.env_origins[env_ids, 2]
+  _zero_low_clearance_pose_tilt(
+    pose_samples, root_height, data_low_clearance_height
   )
   root_state[:, 0:3] += pose_samples[:, 0:3]
   root_state[:, 3:7] = quat_mul(
@@ -760,6 +833,11 @@ def _write_state_and_forward(
   asset.write_joint_state_to_sim(joint_pos, joint_vel, env_ids=env_ids)
   asset.write_root_state_to_sim(root_state, env_ids=env_ids)
   asset.clear_state(env_ids=env_ids)
+  # ``forward()`` runs every simulation world, while mixed resets write the
+  # tilt and data subsets separately.  Cold-start the subset immediately after
+  # its qpos/qvel write so an earlier non-finite solver state cannot poison the
+  # freshly written episode state.
+  env.sim.clear_solver_state(env_ids)
   env.sim.forward()
 
 
@@ -777,6 +855,9 @@ def reset_root_state_mixed(
   data_velocity_range: dict[str, tuple[float, float]] | None = None,
   data_joint_position_range: tuple[float, float] = (0.0, 0.0),
   data_joint_velocity_range: tuple[float, float] = (0.0, 0.0),
+  data_min_root_height: float | None = None,
+  data_max_abs_joint_velocity: float | None = None,
+  data_low_clearance_height: float | None = None,
   use_data_reset_obs_history: bool = False,
   asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
 ) -> None:
@@ -839,6 +920,9 @@ def reset_root_state_mixed(
       data_velocity_range=data_velocity_range,
       data_joint_position_range=data_joint_position_range,
       data_joint_velocity_range=data_joint_velocity_range,
+      data_min_root_height=data_min_root_height,
+      data_max_abs_joint_velocity=data_max_abs_joint_velocity,
+      data_low_clearance_height=data_low_clearance_height,
       asset_name=asset_cfg.name,
       use_data_reset_obs_history=use_data_reset_obs_history,
     )

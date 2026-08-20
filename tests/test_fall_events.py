@@ -1,10 +1,62 @@
 """Tests for fall-task reset metadata and directional force pulses."""
 
+import csv
 from unittest.mock import Mock
 
 import torch
 
 from mjlab.tasks.fall.mdp import events
+
+
+def test_motion_reset_csv_filters_low_and_fast_rows(tmp_path):
+  path = tmp_path / "reset.csv"
+  fieldnames = (
+    "joint_pos_0",
+    "joint_vel_0",
+    "body_pos_w_1_x",
+    "body_pos_w_1_y",
+    "body_pos_w_1_z",
+    "body_quat_w_1_w",
+    "body_quat_w_1_x",
+    "body_quat_w_1_y",
+    "body_quat_w_1_z",
+  )
+  rows = (
+    ("0", "1", "0", "0", "0.50", "1", "0", "0", "0"),
+    ("0", "1", "0", "0", "0.20", "1", "0", "0", "0"),
+    ("0", "41", "0", "0", "0.50", "1", "0", "0", "0"),
+  )
+  with path.open("w", newline="", encoding="utf-8") as csv_file:
+    writer = csv.writer(csv_file)
+    writer.writerow(fieldnames)
+    writer.writerows(rows)
+
+  dataset = events._load_motion_reset_csv(
+    str(path),
+    root_body_idx=0,
+    device="cpu",
+    expected_num_joints=1,
+    min_root_height=0.25,
+    max_abs_joint_velocity=40.0,
+  )
+
+  assert dataset["root_state"].shape[0] == 1
+  assert dataset["root_state"][0, 2].item() == 0.5
+  assert dataset["joint_vel"][0, 0].item() == 1.0
+
+
+def test_low_clearance_pose_tilt_is_suppressed():
+  pose_samples = torch.ones((2, 6))
+
+  events._zero_low_clearance_pose_tilt(
+    pose_samples,
+    root_height=torch.tensor([0.30, 0.50]),
+    low_clearance_height=0.35,
+  )
+
+  assert torch.equal(pose_samples[0, 3:5], torch.zeros(2))
+  assert torch.equal(pose_samples[1, 3:5], torch.ones(2))
+  assert pose_samples[:, 2].tolist() == [1.0, 1.0]
 
 
 def test_load_direction_vectors_w_maps_csv_directions():

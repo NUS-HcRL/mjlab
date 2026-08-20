@@ -452,6 +452,10 @@ class ManagerBasedRlEnv:
 
   def _reset_idx(self, env_ids: torch.Tensor | None = None) -> None:
     self.curriculum_manager.compute(env_ids=env_ids)
+    # Reset solver history as well as qpos/qvel.  In particular, a non-finite
+    # qacc_warmstart otherwise survives an episode reset and can permanently
+    # poison that simulation world.
+    self.sim.clear_solver_state(env_ids)
     # Reset the internal buffers of the scene elements.
     self.scene.reset(env_ids)
 

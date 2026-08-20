@@ -104,6 +104,8 @@ def _sample_one_raw_data_state(env: ManagerBasedRlEnv) -> None:
     root_body_idx=root_body_idx,
     device=env.device,
     expected_num_joints=asset.num_joints,
+    min_root_height=params.get("data_min_root_height"),
+    max_abs_joint_velocity=params.get("data_max_abs_joint_velocity"),
   )
   num_states = motion_pool["root_state"].shape[0]
   if num_states == 0:

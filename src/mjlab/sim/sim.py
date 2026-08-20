@@ -3,6 +3,7 @@ from typing import TYPE_CHECKING, Literal, cast
 
 import mujoco
 import mujoco_warp as mjwarp
+import torch
 import warp as wp
 
 from mjlab.sim.randomization import expand_model_fields
@@ -196,6 +197,29 @@ class Simulation:
         wp.capture_launch(self.forward_graph)
       else:
         mjwarp.forward(self.wp_model, self.wp_data)
+
+  def clear_solver_state(self, env_ids: torch.Tensor | None = None) -> None:
+    """Clear per-world solver state before writing a new episode state.
+
+    ``qacc_warmstart`` carries the previous solve into the next step.  If a
+    world has become non-finite, rewriting only qpos/qvel leaves that poisoned
+    warm-start behind and the reset world can immediately become non-finite
+    again.  The remaining arrays are derived by the next ``forward()`` call,
+    but clearing them here prevents stale non-finite values from surviving
+    between the state write and that recomputation.
+    """
+    env_index: torch.Tensor | slice = (
+      slice(None) if env_ids is None else env_ids
+    )
+    for field_name in ("qacc", "qacc_warmstart", "qfrc_constraint", "efc_force"):
+      try:
+        field = getattr(self.data, field_name)
+      except AttributeError:
+        # Keep this compatible with MJWarp versions that do not expose all
+        # derived constraint arrays on Data.
+        continue
+      if field.ndim > 0 and field.shape[0] == self.num_envs:
+        field[env_index] = 0.0
 
   def step(self) -> None:
     with wp.ScopedDevice(self.wp_device):
