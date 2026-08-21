@@ -82,6 +82,7 @@ def control_descent_speed(
   torso_body_name: str = "LINK_TORSO_YAW",
   asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
   threshold: float = 0.5,
+  max_downward_speed: float = 5.0,
 ) -> torch.Tensor:
   """Penalize torso downward speed beyond a safe threshold."""
   asset: Entity = env.scene[asset_cfg.name]
@@ -89,7 +90,11 @@ def control_descent_speed(
   if not body_ids:
     return torch.zeros(env.num_envs, device=env.device)
   torso_lin_vel_z = asset.data.body_link_lin_vel_w[:, body_ids[0], 2]
-  downward_speed = torch.clamp(-torso_lin_vel_z - threshold, min=0.0)
+  downward_speed = torch.clamp(
+    -torso_lin_vel_z - threshold,
+    min=0.0,
+    max=max_downward_speed,
+  )
   return -(downward_speed**2)
 
 
@@ -204,6 +209,7 @@ class LowerBodyThenUpperBodyContactReward:
     early_upper_penalty: float = 2.0,
     late_upper_penalty: float = 0.2,
     early_upper_force_scale: float = 0.0,
+    max_upper_force: float = 1000.0,
   ) -> None:
     self.sensor_name = sensor_name
     self.lower_body_names = lower_body_names
@@ -215,6 +221,7 @@ class LowerBodyThenUpperBodyContactReward:
     self.early_upper_penalty = early_upper_penalty
     self.late_upper_penalty = late_upper_penalty
     self.early_upper_force_scale = early_upper_force_scale
+    self.max_upper_force = max_upper_force
     self._body_names: list[str] | None = None
     self._lower_body_ids: list[int] | None = None
     self._upper_body_ids: list[int] | None = None
@@ -373,6 +380,12 @@ class LowerBodyThenUpperBodyContactReward:
       upper_force = torch.norm(
         sensor.data.force[:, self._upper_body_ids], dim=-1
       ).max(dim=-1).values
+      upper_force = torch.nan_to_num(
+        upper_force,
+        nan=self.max_upper_force,
+        posinf=self.max_upper_force,
+        neginf=0.0,
+      ).clamp_max(self.max_upper_force)
       reward -= self.early_upper_force_scale * upper_force * early_upper.float()
 
     timely_upper = (

@@ -85,6 +85,12 @@ class RslRlAmpAlgorithmCfg(RslRlPpoAlgorithmCfg):
   """EMA decay for reward magnitude tracking used by `ema_balance`."""
   reward_mix_scale_clip: Tuple[float, float] = (0.2, 5.0)
   """Clamp range for style auto-scale ratio in `ema_balance`."""
+  reward_mix_task_abs_clip: float = 5.0
+  """Upper bound applied to task-reward magnitudes used by the mixing EMA."""
+  invalid_physics_termination_term: str | None = None
+  """Termination term whose samples are excluded from reward mixing statistics."""
+  invalid_physics_terminal_reward: float = -5.0
+  """Final PPO reward assigned to invalid-physics terminal transitions."""
 
   # Discriminator training (MimicKit-style: fewer epochs, small batch, limited replay)
   disc_epochs: int = 2

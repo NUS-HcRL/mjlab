@@ -27,6 +27,7 @@ from mjlab.sim import MujocoCfg, SimulationCfg
 from mjlab.envs.amp import AMPCfg
 from mjlab.tasks.fall import mdp
 from mjlab.tasks.fall.mdp.curriculums import (
+  body_contact_force_threshold_curriculum,
   q25_effort_limit_curriculum,
   reset_force_pulse_curriculum,
   reset_initialization_curriculum,
@@ -326,8 +327,8 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
     "forbidden_contact_force_penalty": RewardTermCfg(
       func=mdp.ForbiddenContactForcePenalty(
         sensor_name="body_contact_force",
-        body_force_thresholds={},  # Set per-robot with termination thresholds.
-        start_ratio=0.4,
+        body_force_thresholds={},  # Set per-robot as fixed dense-reward targets.
+        start_ratio=0.25,
         sharpness=12.0,
         alpha=0.6,
         squash_scale=2.0,
@@ -340,6 +341,7 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
       params={
         "torso_body_name": "LINK_TORSO_YAW",
         "threshold": 0.5,
+        "max_downward_speed": 5.0,
       },
     ),
     "impact_velocity_reward": RewardTermCfg(
@@ -391,13 +393,14 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
           "LINK_ELBOW_END_L",
           "LINK_ELBOW_END_R",
         ),
-        min_delay_s=0.2,
+        min_delay_s=0.1,
         max_delay_s=0.6,
         lower_first_bonus=0.5,
         timely_upper_bonus=1.0,
         early_upper_penalty=4.0,
         late_upper_penalty=0.2,
         early_upper_force_scale=0.002,
+        max_upper_force=1000.0,
       ),
       weight=0.10,
     ),
@@ -422,6 +425,16 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
       func=nonfinite_state,
       params={"asset_cfg": SceneEntityCfg("robot")},
     ),
+    "invalid_physics_state": TerminationTermCfg(
+      func=mdp.invalid_physics_state,
+      params={
+        "sensor_name": "body_contact_force",
+        "asset_cfg": SceneEntityCfg("robot"),
+        "max_body_linear_speed": 20.0,
+        "max_joint_speed": 100.0,
+        "max_contact_force": 20_000.0,
+      },
+    ),
     "forbidden_body_contact_force": TerminationTermCfg(
       func=mdp.BadBodyContactForce(),
       params={
@@ -443,6 +456,38 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
         "stages": [
           {"step": 0, "scale": 1.0},
           {"step": 25_000 * 32, "scale": 1.4},
+        ],
+      },
+    ),
+    "upper_body_termination_force": CurriculumTermCfg(
+      func=body_contact_force_threshold_curriculum,
+      params={
+        "termination_term_name": "forbidden_body_contact_force",
+        "threshold_stages": [
+          {
+            "step": 0,
+            "body_force_thresholds": {
+              "LINK_TORSO_YAW": 1000.0,
+              "LINK_ELBOW_END_L": 800.0,
+              "LINK_ELBOW_END_R": 800.0,
+            },
+          },
+          {
+            "step": 16_000 * 32,
+            "body_force_thresholds": {
+              "LINK_TORSO_YAW": 800.0,
+              "LINK_ELBOW_END_L": 600.0,
+              "LINK_ELBOW_END_R": 600.0,
+            },
+          },
+          {
+            "step": 25_000 * 32,
+            "body_force_thresholds": {
+              "LINK_TORSO_YAW": 650.0,
+              "LINK_ELBOW_END_L": 350.0,
+              "LINK_ELBOW_END_R": 350.0,
+            },
+          },
         ],
       },
     ),

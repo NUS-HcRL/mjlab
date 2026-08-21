@@ -115,6 +115,9 @@ class MjlabAmpOnPolicyRunner:
       "reward_mix_mode",
       "reward_mix_ema_decay",
       "reward_mix_scale_clip",
+      "reward_mix_task_abs_clip",
+      "invalid_physics_termination_term",
+      "invalid_physics_terminal_reward",
     }
     dropped_alg_keys: list[str] = []
     for key in list(alg_kwargs.keys()):
@@ -161,6 +164,15 @@ class MjlabAmpOnPolicyRunner:
     self._reward_mix_ema_decay = float(self.alg_cfg.get("reward_mix_ema_decay", 0.99))
     lo, hi = self.alg_cfg.get("reward_mix_scale_clip", (0.2, 5.0))
     self._reward_mix_scale_clip = (float(lo), float(hi))
+    self._reward_mix_task_abs_clip = float(
+      self.alg_cfg.get("reward_mix_task_abs_clip", 5.0)
+    )
+    self._invalid_physics_termination_term = self.alg_cfg.get(
+      "invalid_physics_termination_term"
+    )
+    self._invalid_physics_terminal_reward = float(
+      self.alg_cfg.get("invalid_physics_terminal_reward", -5.0)
+    )
     self._task_abs_ema = 1.0
     self._style_abs_ema = 1.0
 
@@ -248,8 +260,8 @@ class MjlabAmpOnPolicyRunner:
       mean_style_reward_log = 0.0
       mean_style_reward_std_log = 0.0
       mean_task_reward_log = 0.0
-      mean_style_balance_scale_log = 1.0
-      mean_task_weight_scale_log = 1.0
+      mean_style_balance_scale_log = 0.0
+      mean_task_weight_scale_log = 0.0
 
       with torch.inference_mode():
         for _ in range(self.num_steps_per_env):
@@ -280,13 +292,43 @@ class MjlabAmpOnPolicyRunner:
           style_rewards = torch.nan_to_num(
             style_rewards, nan=0.0, posinf=0.0, neginf=0.0
           )
+          invalid_physics_mask = torch.zeros_like(done_mask)
+          if self._invalid_physics_termination_term is not None:
+            unwrapped_env = getattr(self.env, "unwrapped", self.env)
+            termination_manager = getattr(
+              unwrapped_env, "termination_manager", None
+            )
+            if termination_manager is not None:
+              invalid_physics_mask = termination_manager.get_term(
+                self._invalid_physics_termination_term
+              ).to(self.device)
+          rewards = torch.where(
+            invalid_physics_mask,
+            torch.full_like(rewards, self._invalid_physics_terminal_reward),
+            rewards,
+          )
+
           style_rewards_for_mix = style_rewards
           if self._reward_mix_mode == "ema_balance":
-            task_abs = float(rewards.detach().abs().mean().item())
-            style_abs = float(style_rewards.detach().abs().mean().item())
-            decay = self._reward_mix_ema_decay
-            self._task_abs_ema = decay * self._task_abs_ema + (1.0 - decay) * task_abs
-            self._style_abs_ema = decay * self._style_abs_ema + (1.0 - decay) * style_abs
+            valid_mix_mask = ~invalid_physics_mask
+            if valid_mix_mask.any():
+              task_abs = float(
+                rewards.detach()[valid_mix_mask]
+                .abs()
+                .clamp_max(self._reward_mix_task_abs_clip)
+                .mean()
+                .item()
+              )
+              style_abs = float(
+                style_rewards.detach()[valid_mix_mask].abs().mean().item()
+              )
+              decay = self._reward_mix_ema_decay
+              self._task_abs_ema = (
+                decay * self._task_abs_ema + (1.0 - decay) * task_abs
+              )
+              self._style_abs_ema = (
+                decay * self._style_abs_ema + (1.0 - decay) * style_abs
+              )
             raw_scale = self._task_abs_ema / max(self._style_abs_ema, 1e-6)
             lo, hi = self._reward_mix_scale_clip
             style_balance_scale = max(lo, min(hi, raw_scale))
@@ -296,14 +338,20 @@ class MjlabAmpOnPolicyRunner:
           mean_task_reward_log += rewards.mean().item()
           mean_style_reward_log += style_rewards.mean().item()
           mean_style_reward_std_log += style_rewards.std(unbiased=False).item()
+          unwrapped_env = getattr(self.env, "unwrapped", self.env)
           task_weight_scale = float(
-            getattr(self.env, "task_reward_weight_scale", 1.0)
+            getattr(unwrapped_env, "task_reward_weight_scale", 1.0)
           )
           mean_task_weight_scale_log += task_weight_scale
 
           rewards = (
             self.alg.task_reward_weight * task_weight_scale * rewards
             + self.alg.disc_reward_weight * style_rewards_for_mix
+          )
+          rewards = torch.where(
+            invalid_physics_mask,
+            torch.full_like(rewards, self._invalid_physics_terminal_reward),
+            rewards,
           )
 
           self.alg.process_env_step(obs, rewards, dones, extras)
