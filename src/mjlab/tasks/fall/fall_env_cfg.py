@@ -27,7 +27,6 @@ from mjlab.sim import MujocoCfg, SimulationCfg
 from mjlab.envs.amp import AMPCfg
 from mjlab.tasks.fall import mdp
 from mjlab.tasks.fall.mdp.curriculums import (
-  body_contact_force_threshold_curriculum,
   q25_effort_limit_curriculum,
   reset_force_pulse_curriculum,
   reset_initialization_curriculum,
@@ -459,38 +458,6 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
         ],
       },
     ),
-    "upper_body_termination_force": CurriculumTermCfg(
-      func=body_contact_force_threshold_curriculum,
-      params={
-        "termination_term_name": "forbidden_body_contact_force",
-        "threshold_stages": [
-          {
-            "step": 0,
-            "body_force_thresholds": {
-              "LINK_TORSO_YAW": 1000.0,
-              "LINK_ELBOW_END_L": 800.0,
-              "LINK_ELBOW_END_R": 800.0,
-            },
-          },
-          {
-            "step": 16_000 * 32,
-            "body_force_thresholds": {
-              "LINK_TORSO_YAW": 800.0,
-              "LINK_ELBOW_END_L": 600.0,
-              "LINK_ELBOW_END_R": 600.0,
-            },
-          },
-          {
-            "step": 25_000 * 32,
-            "body_force_thresholds": {
-              "LINK_TORSO_YAW": 650.0,
-              "LINK_ELBOW_END_L": 350.0,
-              "LINK_ELBOW_END_R": 350.0,
-            },
-          },
-        ],
-      },
-    ),
     "reset_init": CurriculumTermCfg(
       func=reset_initialization_curriculum,
       params={
@@ -614,11 +581,11 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
           },
           {
             "step": 15_000 * 32,
-            "duration_steps_range": (5, 30),
+            "duration_steps_range": (5, 25),
             "force_axis_range": {
-              "x": (-400.0, 400.0),
-              "y": (-400.0, 400.0),
-              "z": (-100.0, -100.0),
+              "x": (-300.0, 300.0),
+              "y": (-300.0, 300.0),
+              "z": (-80.0, -80.0),
             },
           },
         ],

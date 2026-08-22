@@ -5,9 +5,6 @@ from unittest.mock import Mock
 
 import torch
 
-from mjlab.tasks.fall.mdp.curriculums import (
-  body_contact_force_threshold_curriculum,
-)
 from mjlab.tasks.fall.mdp.rewards import (
   LowerBodyThenUpperBodyContactReward,
   control_descent_speed,
@@ -88,51 +85,3 @@ def test_invalid_physics_state_detects_each_finite_limit():
   invalid = invalid_physics_state(env, sensor_name="body_contact_force")
 
   assert invalid.tolist() == [False, True, True, True]
-
-
-def test_body_contact_force_threshold_curriculum_only_updates_staged_bodies():
-  thresholds = {
-    "LINK_HEAD_YAW": 200.0,
-    "LINK_TORSO_YAW": 500.0,
-    "LINK_ELBOW_END_L": 200.0,
-    "LINK_ELBOW_END_R": 200.0,
-  }
-  term_cfg = SimpleNamespace(params={"body_force_thresholds": thresholds})
-  env = SimpleNamespace(
-    common_step_counter=8_000 * 32,
-    termination_manager=SimpleNamespace(
-      cfg={"forbidden_body_contact_force": term_cfg}
-    ),
-  )
-  stages = [
-    {
-      "step": 0,
-      "body_force_thresholds": {
-        "LINK_TORSO_YAW": 1000.0,
-        "LINK_ELBOW_END_L": 800.0,
-        "LINK_ELBOW_END_R": 800.0,
-      },
-    },
-    {
-      "step": 8_000 * 32,
-      "body_force_thresholds": {
-        "LINK_TORSO_YAW": 800.0,
-        "LINK_ELBOW_END_L": 600.0,
-        "LINK_ELBOW_END_R": 600.0,
-      },
-    },
-  ]
-
-  body_contact_force_threshold_curriculum(
-    env,
-    env_ids=torch.tensor([0]),
-    termination_term_name="forbidden_body_contact_force",
-    threshold_stages=stages,
-  )
-
-  assert thresholds == {
-    "LINK_HEAD_YAW": 200.0,
-    "LINK_TORSO_YAW": 800.0,
-    "LINK_ELBOW_END_L": 600.0,
-    "LINK_ELBOW_END_R": 600.0,
-  }

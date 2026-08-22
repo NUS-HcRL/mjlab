@@ -34,7 +34,6 @@ def _freeze_curriculum_to_final_stage(cfg: ManagerBasedRlEnvCfg) -> None:
 
   stage_param_names = {
     "task_reward_weight": "stages",
-    "upper_body_termination_force": "threshold_stages",
     "reset_init": "init_stages",
     "reset_push": "push_stages",
     "reset_force_pulse": "pulse_stages",
@@ -145,27 +144,32 @@ def pm1_flat_falling_env_cfg(
     "LINK_ELBOW_END_L",
     "LINK_ELBOW_END_R",
   )
-  forbidden_body_force_thresholds = {
+  forbidden_termination_force_thresholds = {
+    "LINK_HEAD_YAW": 200.0,
+    "LINK_TORSO_YAW": 600.0,
+    "LINK_ELBOW_END_L": 400.0,
+    "LINK_ELBOW_END_R": 400.0,
+    "LINK_SHOULDER_ROLL_L": 600.0,
+    "LINK_SHOULDER_ROLL_R": 600.0,
+  }
+  forbidden_reward_force_thresholds = {
     "LINK_HEAD_YAW": 200.0,
     "LINK_TORSO_YAW": 500.0,
     "LINK_ELBOW_END_L": 200.0,
     "LINK_ELBOW_END_R": 200.0,
-    "LINK_SHOULDER_ROLL_L": 500.0,
-    "LINK_SHOULDER_ROLL_R": 500.0,
   }
   cfg.terminations["forbidden_body_contact_force"].params[
     "body_names"
   ] = forbidden_body_names
   cfg.terminations["forbidden_body_contact_force"].params[
     "body_force_thresholds"
-  ] = forbidden_body_force_thresholds
+  ] = forbidden_termination_force_thresholds
   forbidden_force_reward = cfg.rewards.get("forbidden_contact_force_penalty")
   if forbidden_force_reward is not None:
-    # Keep the dense reward target fixed even while the hard elbow termination
-    # threshold is relaxed by curriculum.
-    forbidden_force_reward.func.body_force_thresholds = {
-      name: forbidden_body_force_thresholds[name] for name in forbidden_body_names
-    }
+    # Penalize excessive force before it reaches the fixed termination threshold.
+    forbidden_force_reward.func.body_force_thresholds = (
+      forbidden_reward_force_thresholds
+    )
   if protective_finetune:
     _freeze_curriculum_to_final_stage(cfg)
     cfg.rewards["protective_contact"] = RewardTermCfg(

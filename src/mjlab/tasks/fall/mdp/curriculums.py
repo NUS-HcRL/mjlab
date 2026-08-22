@@ -55,13 +55,6 @@ class WeightStage(TypedDict):
   scale: float
 
 
-class BodyForceThresholdStage(TypedDict):
-  """Per-body termination force thresholds active from a training step."""
-
-  step: int
-  body_force_thresholds: dict[str, float]
-
-
 class Q25EffortLimitStage(TypedDict):
   """PM1 Q25 actuator torque ceiling node (see ``fall_env_cfg`` q25_effort_limit)."""
 
@@ -298,38 +291,6 @@ def task_reward_weight_curriculum(
   env_any.task_reward_weight_scale = scale
   return {
     "task_reward_weight_scale": torch.tensor(scale, dtype=torch.float32),
-  }
-
-
-def body_contact_force_threshold_curriculum(
-  env: ManagerBasedRlEnv,
-  env_ids: torch.Tensor,
-  termination_term_name: str,
-  threshold_stages: list[BodyForceThresholdStage],
-) -> dict[str, torch.Tensor]:
-  """Update selected per-body hard-termination force thresholds by stage."""
-  del env_ids
-  active_stage = threshold_stages[0]
-  for stage in threshold_stages:
-    if env.common_step_counter >= stage["step"]:
-      active_stage = stage
-
-  term_cfg = env.termination_manager.cfg[termination_term_name]
-  current_thresholds = term_cfg.params["body_force_thresholds"]
-  stage_thresholds = active_stage["body_force_thresholds"]
-  missing_bodies = set(stage_thresholds) - set(current_thresholds)
-  if missing_bodies:
-    raise ValueError(
-      "body_contact_force_threshold_curriculum: staged bodies missing from "
-      f"termination term {termination_term_name!r}: {sorted(missing_bodies)}"
-    )
-  current_thresholds.update(stage_thresholds)
-
-  return {
-    f"{name.removeprefix('LINK_').lower()}_threshold": torch.tensor(
-      threshold, dtype=torch.float32
-    )
-    for name, threshold in stage_thresholds.items()
   }
 
 
