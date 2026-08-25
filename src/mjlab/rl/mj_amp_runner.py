@@ -260,6 +260,9 @@ class MjlabAmpOnPolicyRunner:
       mean_style_reward_log = 0.0
       mean_style_reward_std_log = 0.0
       mean_task_reward_log = 0.0
+      mean_effective_task_reward_log = 0.0
+      mean_effective_style_reward_log = 0.0
+      mean_effective_mixed_reward_log = 0.0
       mean_style_balance_scale_log = 0.0
       mean_task_weight_scale_log = 0.0
 
@@ -344,15 +347,33 @@ class MjlabAmpOnPolicyRunner:
           )
           mean_task_weight_scale_log += task_weight_scale
 
-          rewards = (
+          effective_task_rewards = (
             self.alg.task_reward_weight * task_weight_scale * rewards
-            + self.alg.disc_reward_weight * style_rewards_for_mix
           )
+          effective_style_rewards = (
+            self.alg.disc_reward_weight * style_rewards_for_mix
+          )
+          effective_task_rewards = torch.where(
+            invalid_physics_mask,
+            torch.full_like(
+              effective_task_rewards, self._invalid_physics_terminal_reward
+            ),
+            effective_task_rewards,
+          )
+          effective_style_rewards = torch.where(
+            invalid_physics_mask,
+            torch.zeros_like(effective_style_rewards),
+            effective_style_rewards,
+          )
+          rewards = effective_task_rewards + effective_style_rewards
           rewards = torch.where(
             invalid_physics_mask,
             torch.full_like(rewards, self._invalid_physics_terminal_reward),
             rewards,
           )
+          mean_effective_task_reward_log += effective_task_rewards.mean().item()
+          mean_effective_style_reward_log += effective_style_rewards.mean().item()
+          mean_effective_mixed_reward_log += rewards.mean().item()
 
           self.alg.process_env_step(obs, rewards, dones, extras)
           self.alg.process_amp_step(pair_next_amp_obs)
@@ -381,6 +402,9 @@ class MjlabAmpOnPolicyRunner:
       mean_style_reward_log /= self.num_steps_per_env
       mean_style_reward_std_log /= self.num_steps_per_env
       mean_task_reward_log /= self.num_steps_per_env
+      mean_effective_task_reward_log /= self.num_steps_per_env
+      mean_effective_style_reward_log /= self.num_steps_per_env
+      mean_effective_mixed_reward_log /= self.num_steps_per_env
       mean_style_balance_scale_log /= self.num_steps_per_env
       mean_task_weight_scale_log /= self.num_steps_per_env
 
@@ -530,6 +554,21 @@ class MjlabAmpOnPolicyRunner:
       )
       writer.add_scalar(
         "Train/mean_task_reward", locs["mean_task_reward_log"], locs["it"]
+      )
+      writer.add_scalar(
+        "Train/mean_effective_task_reward",
+        locs["mean_effective_task_reward_log"],
+        locs["it"],
+      )
+      writer.add_scalar(
+        "Train/mean_effective_style_reward",
+        locs["mean_effective_style_reward_log"],
+        locs["it"],
+      )
+      writer.add_scalar(
+        "Train/mean_effective_mixed_reward",
+        locs["mean_effective_mixed_reward_log"],
+        locs["it"],
       )
       if self.logger_type != "wandb":
         writer.add_scalar(

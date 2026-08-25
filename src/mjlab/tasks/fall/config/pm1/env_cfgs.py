@@ -145,10 +145,10 @@ def pm1_flat_falling_env_cfg(
     "LINK_ELBOW_END_R",
   )
   forbidden_termination_force_thresholds = {
-    "LINK_HEAD_YAW": 200.0,
+    "LINK_HEAD_YAW": 250.0,
     "LINK_TORSO_YAW": 600.0,
-    "LINK_ELBOW_END_L": 500.0,
-    "LINK_ELBOW_END_R": 500.0,
+    "LINK_ELBOW_END_L": 250.0,
+    "LINK_ELBOW_END_R": 250.0,
     "LINK_SHOULDER_ROLL_L": 600.0,
     "LINK_SHOULDER_ROLL_R": 600.0,
   }
@@ -157,6 +157,13 @@ def pm1_flat_falling_env_cfg(
     "LINK_TORSO_YAW": 500.0,
     "LINK_ELBOW_END_L": 200.0,
     "LINK_ELBOW_END_R": 200.0,
+  }
+  contact_reward_force_scales = {
+    **forbidden_reward_force_thresholds,
+    "LINK_SHOULDER_ROLL_L": 500.0,
+    "LINK_SHOULDER_ROLL_R": 500.0,
+    "LINK_SHOULDER_YAW_L": 500.0,
+    "LINK_SHOULDER_YAW_R": 500.0,
   }
   cfg.terminations["forbidden_body_contact_force"].params[
     "body_names"
@@ -170,6 +177,9 @@ def pm1_flat_falling_env_cfg(
     forbidden_force_reward.func.body_force_thresholds = (
       forbidden_reward_force_thresholds
     )
+  reduce_force_reward = cfg.rewards.get("reduce_contact_force")
+  if reduce_force_reward is not None:
+    reduce_force_reward.func.body_force_scales = contact_reward_force_scales
   if protective_finetune:
     _freeze_curriculum_to_final_stage(cfg)
     cfg.rewards["protective_contact"] = RewardTermCfg(

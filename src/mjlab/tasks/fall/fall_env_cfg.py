@@ -310,8 +310,12 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
         high_weight=500.0,
         medium_weight=50.0,
         low_weight=0.5,
-        alpha=0.5,
-        squash_scale=0.02,
+        sum_weight=0.25,
+        # Per-robot force references are injected by the robot-specific config.
+        squash_scale=0.0,
+        max_penalty=2.0,
+        body_force_scales={},
+        default_force_scale=1000.0,
         tracked_body_names=(
           "LINK_HEAD_YAW",
           "LINK_TORSO_YAW",
@@ -321,18 +325,25 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
           "LINK_SHOULDER_ROLL_R",
         ),
       ),
-      weight=0.012, # 0.01
+      weight=10.0,
     ),
     "forbidden_contact_force_penalty": RewardTermCfg(
       func=mdp.ForbiddenContactForcePenalty(
         sensor_name="body_contact_force",
         body_force_thresholds={},  # Set per-robot as fixed dense-reward targets.
-        start_ratio=0.25,
+        start_ratio=0.75,
         sharpness=12.0,
         alpha=0.6,
         squash_scale=2.0,
       ),
-      weight=1.0,
+      weight=3.0,
+    ),
+    "forbidden_contact_termination": RewardTermCfg(
+      func=mdp.termination_event,
+      weight=-2.0,
+      params={
+        "termination_term_name": "forbidden_body_contact_force",
+      },
     ),
     "control_descent_speed": RewardTermCfg(
       func=mdp.control_descent_speed,
@@ -392,7 +403,7 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
           "LINK_ELBOW_END_L",
           "LINK_ELBOW_END_R",
         ),
-        min_delay_s=0.1,
+        min_delay_s=0.15,
         max_delay_s=0.6,
         lower_first_bonus=0.5,
         timely_upper_bonus=1.0,
@@ -400,6 +411,7 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
         late_upper_penalty=0.2,
         early_upper_force_scale=0.002,
         max_upper_force=1000.0,
+        min_lower_contact_force=20.0,
       ),
       weight=0.10,
     ),
@@ -454,7 +466,6 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
       params={
         "stages": [
           {"step": 0, "scale": 1.0},
-          {"step": 25_000 * 32, "scale": 1.4},
         ],
       },
     ),

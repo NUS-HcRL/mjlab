@@ -98,6 +98,20 @@ def control_descent_speed(
   return -(downward_speed**2)
 
 
+def termination_event(
+  env: ManagerBasedRlEnv,
+  termination_term_name: str,
+) -> torch.Tensor:
+  """Return a one-shot termination indicator that survives reward dt scaling.
+
+  RewardManager interprets reward functions as rates and multiplies them by ``dt``.
+  Dividing the event indicator by ``step_dt`` makes a configured weight the exact
+  one-step terminal reward instead of shrinking it by the control timestep.
+  """
+  terminated = env.termination_manager.get_term(termination_term_name)
+  return terminated.float() / max(float(env.step_dt), 1e-6)
+
+
 class ImpactVelocityReward:
   """Penalize each body's first ground contact once per episode."""
 
@@ -142,7 +156,10 @@ class ImpactVelocityReward:
       )
     if not self._body_ids:
       return False
-    if self._contacted_once is None or self._contacted_once.shape != sensor.data.found.shape:
+    if (
+      self._contacted_once is None
+      or self._contacted_once.shape != sensor.data.found.shape
+    ):
       self._contacted_once = torch.zeros_like(sensor.data.found, dtype=torch.bool)
     return True
 
@@ -210,6 +227,7 @@ class LowerBodyThenUpperBodyContactReward:
     late_upper_penalty: float = 0.2,
     early_upper_force_scale: float = 0.0,
     max_upper_force: float = 1000.0,
+    min_lower_contact_force: float = 20.0,
   ) -> None:
     self.sensor_name = sensor_name
     self.lower_body_names = lower_body_names
@@ -222,6 +240,7 @@ class LowerBodyThenUpperBodyContactReward:
     self.late_upper_penalty = late_upper_penalty
     self.early_upper_force_scale = early_upper_force_scale
     self.max_upper_force = max_upper_force
+    self.min_lower_contact_force = min_lower_contact_force
     self._body_names: list[str] | None = None
     self._lower_body_ids: list[int] | None = None
     self._upper_body_ids: list[int] | None = None
@@ -254,9 +273,7 @@ class LowerBodyThenUpperBodyContactReward:
       self._lower_contact_time is None
       or self._lower_contact_time.shape[0] != env.num_envs
     ):
-      self._lower_contact_time = torch.full(
-        (env.num_envs,), -1.0, device=env.device
-      )
+      self._lower_contact_time = torch.full((env.num_envs,), -1.0, device=env.device)
     if (
       self._upper_contacted_once is None
       or self._upper_contacted_once.shape[0] != env.num_envs
@@ -355,38 +372,48 @@ class LowerBodyThenUpperBodyContactReward:
 
     contact_now = sensor.data.found > 0
     first_contact = sensor.compute_first_contact(dt=env.step_dt)
-    lower_first = torch.any(first_contact[:, self._lower_body_ids], dim=-1)
     upper_first = torch.any(first_contact[:, self._upper_body_ids], dim=-1)
     upper_contact_now = torch.any(contact_now[:, self._upper_body_ids], dim=-1)
+    assert sensor.data.force is not None
+    lower_force = (
+      torch.norm(sensor.data.force[:, self._lower_body_ids], dim=-1).max(dim=-1).values
+    )
+    lower_contact_valid = torch.any(contact_now[:, self._lower_body_ids], dim=-1) & (
+      lower_force >= self.min_lower_contact_force
+    )
 
     current_time = env.sim.data.time
     has_lower_contact = self._lower_contact_time >= 0.0
     delay_since_lower = current_time - self._lower_contact_time
 
-    reward = torch.zeros(env.num_envs, device=env.device)
-    first_lower_contact = lower_first & ~has_lower_contact
-    reward += self.lower_first_bonus * first_lower_contact.float()
+    event_reward = torch.zeros(env.num_envs, device=env.device)
+    rate_reward = torch.zeros(env.num_envs, device=env.device)
+    first_lower_contact = lower_contact_valid & ~has_lower_contact
+    event_reward += self.lower_first_bonus * first_lower_contact.float()
     self._lower_contacted_once |= first_lower_contact
 
     early_upper = upper_contact_now & (
       ~has_lower_contact | (delay_since_lower < self.min_delay_s)
     )
-    reward -= self.early_upper_penalty * early_upper.float()
+    early_upper_event = early_upper & ~self._early_upper_once
+    event_reward -= self.early_upper_penalty * early_upper_event.float()
     first_upper_before_lower = upper_first & ~has_lower_contact
     self._first_upper_before_lower_once |= first_upper_before_lower
     self._early_upper_once |= early_upper
     if self.early_upper_force_scale > 0.0:
       assert sensor.data.force is not None
-      upper_force = torch.norm(
-        sensor.data.force[:, self._upper_body_ids], dim=-1
-      ).max(dim=-1).values
+      upper_force = (
+        torch.norm(sensor.data.force[:, self._upper_body_ids], dim=-1)
+        .max(dim=-1)
+        .values
+      )
       upper_force = torch.nan_to_num(
         upper_force,
         nan=self.max_upper_force,
         posinf=self.max_upper_force,
         neginf=0.0,
       ).clamp_max(self.max_upper_force)
-      reward -= self.early_upper_force_scale * upper_force * early_upper.float()
+      rate_reward -= self.early_upper_force_scale * upper_force * early_upper.float()
 
     timely_upper = (
       upper_first
@@ -395,7 +422,7 @@ class LowerBodyThenUpperBodyContactReward:
       & (delay_since_lower >= self.min_delay_s)
       & (delay_since_lower <= self.max_delay_s)
     )
-    reward += self.timely_upper_bonus * timely_upper.float()
+    event_reward += self.timely_upper_bonus * timely_upper.float()
     self._timely_upper_once |= timely_upper
     valid_upper_delay = upper_first & has_lower_contact & ~self._upper_contacted_once
     self._upper_delay_sum += torch.where(
@@ -411,14 +438,17 @@ class LowerBodyThenUpperBodyContactReward:
       & (delay_since_lower > self.max_delay_s)
       & ~upper_contact_now
     )
-    reward -= self.late_upper_penalty * late_upper.float()
-    self._late_upper_once |= late_upper
+    late_upper_event = late_upper & ~self._late_upper_once
+    event_reward -= self.late_upper_penalty * late_upper_event.float()
+    self._late_upper_once |= late_upper_event
 
     self._lower_contact_time = torch.where(
       first_lower_contact, current_time, self._lower_contact_time
     )
     self._upper_contacted_once |= upper_contact_now
-    return reward
+    # Event values are exact one-step rewards after RewardManager multiplies by dt;
+    # force shaping remains a per-second rate while contact persists.
+    return rate_reward + event_reward / max(float(env.step_dt), 1e-6)
 
 
 class ProtectiveContactReward:
@@ -452,7 +482,9 @@ class ProtectiveContactReward:
       self._body_names = _get_sensor_body_names(sensor)
     if self._protected_body_ids is None:
       self._protected_body_ids = [
-        i for i, name in enumerate(self._body_names) if name in self.protected_body_names
+        i
+        for i, name in enumerate(self._body_names)
+        if name in self.protected_body_names
       ]
     if not self._protected_body_ids:
       return False
@@ -495,7 +527,9 @@ class ProtectiveContactReward:
     assert sensor.data.found is not None
 
     contact_indicators = (sensor.data.found > 0).float()
-    force_norm = torch.norm(contact_indicators.unsqueeze(-1) * sensor.data.force, dim=-1)
+    force_norm = torch.norm(
+      contact_indicators.unsqueeze(-1) * sensor.data.force, dim=-1
+    )
     protected_force = force_norm[:, self._protected_body_ids]
     protected_max = protected_force.max(dim=-1).values
 
@@ -520,7 +554,9 @@ class ProtectiveContactReward:
       self.protected_force_bonus * protected_score
       + self.first_contact_bonus * protected_first.float()
       - self.unprotected_force_penalty * unprotected_score
-      - self.first_contact_bonus * self.unprotected_force_penalty * unprotected_first.float()
+      - self.first_contact_bonus
+      * self.unprotected_force_penalty
+      * unprotected_first.float()
     )
 
     total_force = force_norm.sum(dim=-1).clamp_min(1e-6)
@@ -565,9 +601,9 @@ def soft_landing(
 
 class ReduceContactForceWeighted:
   """Reward for reducing contact force based on paper formula.
-  
-  Implements the weighted average-plus-peak contact force penalty.
-  
+
+  Uses a monotonic normalized peak-plus-cumulative contact force penalty.
+
   Args:
     env: The environment.
     sensor_name: Name of the contact sensor (e.g., "body_contact_force").
@@ -578,8 +614,13 @@ class ReduceContactForceWeighted:
     shoulder_weight: Sensitivity weight for shoulder bodies (default: 5.0).
     medium_weight: Sensitivity weight for medium vulnerability bodies (default: 1.0).
     low_weight: Sensitivity weight for low vulnerability bodies (default: 0.5).
-    alpha: Weight balancing average and peak forces (default: 0.3).
-    
+    sum_weight: Weight on cumulative normalized force in addition to the peak.
+    squash_scale: Log-compression scale; set to zero to keep the penalty linear.
+    max_penalty: Optional upper bound applied before compression for numerical safety.
+    body_force_scales: Optional per-body reference forces. When provided, the reward
+      uses physical force divided by its reference instead of vulnerability weights.
+    default_force_scale: Reference force for bodies absent from body_force_scales.
+
   Returns:
     Reward tensor of shape [B] where higher values indicate lower contact forces.
     This is a penalty (negative reward), so higher values mean less penalty.
@@ -595,8 +636,11 @@ class ReduceContactForceWeighted:
     shoulder_weight: float = 5.0,
     medium_weight: float = 1.0,
     low_weight: float = 0.1,
-    alpha: float = 0.3,
+    sum_weight: float = 0.25,
     squash_scale: float = 0.02,
+    max_penalty: float | None = None,
+    body_force_scales: dict[str, float] | None = None,
+    default_force_scale: float = 1000.0,
     tracked_body_names: tuple[str, ...] = (),
   ) -> None:
     self.sensor_name = sensor_name
@@ -607,10 +651,14 @@ class ReduceContactForceWeighted:
     self.shoulder_weight = shoulder_weight
     self.medium_weight = medium_weight
     self.low_weight = low_weight
-    self.alpha = alpha
+    self.sum_weight = sum_weight
     self.squash_scale = squash_scale
+    self.max_penalty = max_penalty
+    self.body_force_scales = body_force_scales
+    self.default_force_scale = default_force_scale
     self.tracked_body_names = tracked_body_names
     self._body_names: list[str] | None = None
+    self._force_scales: torch.Tensor | None = None
     self._metric_sums: dict[str, torch.Tensor] = {}
     self._metric_steps: torch.Tensor | None = None
 
@@ -621,6 +669,19 @@ class ReduceContactForceWeighted:
       self._body_names = _get_sensor_body_names(sensor)
     if not self._body_names:
       return False
+    if self.body_force_scales is not None and self._force_scales is None:
+      if self.default_force_scale <= 0.0 or any(
+        scale <= 0.0 for scale in self.body_force_scales.values()
+      ):
+        raise ValueError("Contact-force reference scales must be positive")
+      self._force_scales = torch.tensor(
+        [
+          self.body_force_scales.get(name, self.default_force_scale)
+          for name in self._body_names
+        ],
+        device=sensor.data.force.device,
+        dtype=sensor.data.force.dtype,
+      )
     if self._metric_steps is None or self._metric_steps.shape[0] != env.num_envs:
       self._metric_steps = torch.zeros(env.num_envs, device=env.device)
       self._metric_sums = {}
@@ -687,9 +748,23 @@ class ReduceContactForceWeighted:
     weighted_force_norm = force_norm * weights.unsqueeze(0)
 
     num_active_contacts = contact_indicators.sum(dim=-1, keepdim=True).clamp(min=1.0)
-    average_term = weighted_force_norm.sum(dim=-1) / num_active_contacts.squeeze(-1)
-    peak_term = weighted_force_norm.max(dim=-1)[0]
-    penalty = average_term + self.alpha * peak_term
+    weighted_average_term = weighted_force_norm.sum(
+      dim=-1
+    ) / num_active_contacts.squeeze(-1)
+    weighted_peak_term = weighted_force_norm.max(dim=-1)[0]
+
+    if self.body_force_scales is not None:
+      assert self._force_scales is not None
+      reward_force_norm = force_norm / self._force_scales.unsqueeze(0)
+    else:
+      reward_force_norm = weighted_force_norm
+
+    average_term = reward_force_norm.sum(dim=-1) / num_active_contacts.squeeze(-1)
+    sum_term = reward_force_norm.sum(dim=-1)
+    peak_term = reward_force_norm.max(dim=-1)[0]
+    # This form is monotonic in every body's force. Dividing by the number of active
+    # contacts allowed tiny additional contacts to reduce the old average-based cost.
+    penalty = peak_term + self.sum_weight * sum_term
 
     self._metric_steps += 1.0
     high_max = self._group_max(force_norm, self.high_weight_bodies)
@@ -705,16 +780,29 @@ class ReduceContactForceWeighted:
     self._accumulate("shoulder_max", shoulder_max)
     self._accumulate("medium_max", medium_max)
     self._accumulate("low_max", self._group_max(force_norm, low_bodies))
-    self._accumulate("weighted_average", average_term)
-    self._accumulate("weighted_peak", peak_term)
+    self._accumulate("weighted_average", weighted_average_term)
+    self._accumulate("weighted_peak", weighted_peak_term)
+    if self.body_force_scales is not None:
+      self._accumulate("normalized_average", average_term)
+      self._accumulate("normalized_sum", sum_term)
+      self._accumulate("normalized_peak", peak_term)
+    self._accumulate("raw_penalty", penalty)
     for body_name in self.tracked_body_names:
       self._accumulate(
         f"{_body_log_name(body_name)}_max",
         self._group_max(force_norm, (body_name,)),
       )
 
+    if self.max_penalty is not None:
+      penalty = torch.nan_to_num(
+        penalty,
+        nan=self.max_penalty,
+        posinf=self.max_penalty,
+        neginf=0.0,
+      ).clamp(min=0.0, max=self.max_penalty)
     if self.squash_scale > 0.0:
       penalty = torch.log1p(self.squash_scale * penalty) / self.squash_scale
+    self._accumulate("reward_penalty", penalty)
     return -penalty
 
 
@@ -807,9 +895,19 @@ class ForbiddenContactForcePenalty:
     )
     force_ratio = force_norm / self._thresholds.unsqueeze(0)
     excess = (
-      F.softplus((force_ratio - self.start_ratio) * self.sharpness)
+      F.softplus((force_ratio - self.start_ratio) * self.sharpness) / self.sharpness
+    )
+    baseline = (
+      F.softplus(
+        torch.as_tensor(
+          -self.start_ratio * self.sharpness,
+          device=force_ratio.device,
+          dtype=force_ratio.dtype,
+        )
+      )
       / self.sharpness
     )
+    excess = (excess - baseline).clamp_min(0.0)
     excess_sq = excess.square()
     average_term = excess_sq.mean(dim=-1)
     peak_term = excess_sq.max(dim=-1).values
@@ -842,8 +940,11 @@ def reduce_contact_force_weighted(
   shoulder_weight: float = 5.0,
   medium_weight: float = 1.0,
   low_weight: float = 0.1,
-  alpha: float = 0.3,
+  sum_weight: float = 0.25,
   squash_scale: float = 0.02,
+  max_penalty: float | None = None,
+  body_force_scales: dict[str, float] | None = None,
+  default_force_scale: float = 1000.0,
 ) -> torch.Tensor:
   reward = ReduceContactForceWeighted(
     sensor_name=sensor_name,
@@ -854,10 +955,14 @@ def reduce_contact_force_weighted(
     shoulder_weight=shoulder_weight,
     medium_weight=medium_weight,
     low_weight=low_weight,
-    alpha=alpha,
+    sum_weight=sum_weight,
     squash_scale=squash_scale,
+    max_penalty=max_penalty,
+    body_force_scales=body_force_scales,
+    default_force_scale=default_force_scale,
   )
   return reward(env)
+
 
 def joint_wrench_penalty(
   env: ManagerBasedRlEnv,
