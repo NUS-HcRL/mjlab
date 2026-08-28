@@ -152,12 +152,12 @@ def pm1_flat_falling_env_cfg(
     "LINK_ELBOW_END_R",
   )
   forbidden_termination_force_thresholds = {
-    "LINK_HEAD_YAW": 250.0,
-    "LINK_TORSO_YAW": 600.0,
-    "LINK_ELBOW_END_L": 250.0,
-    "LINK_ELBOW_END_R": 250.0,
-    "LINK_SHOULDER_ROLL_L": 600.0,
-    "LINK_SHOULDER_ROLL_R": 600.0,
+    "LINK_HEAD_YAW": 600.0,
+    "LINK_TORSO_YAW": 800.0,
+    "LINK_ELBOW_END_L": 600.0,
+    "LINK_ELBOW_END_R": 600.0,
+    "LINK_SHOULDER_ROLL_L": 800.0,
+    "LINK_SHOULDER_ROLL_R": 800.0,
   }
   forbidden_reward_force_thresholds = {
     "LINK_HEAD_YAW": 200.0,

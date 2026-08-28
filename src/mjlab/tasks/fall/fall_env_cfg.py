@@ -4,17 +4,16 @@ This module provides a factory function to create a base fall task config.
 Robot-specific configurations call the factory and customize as needed.
 """
 
-import math
-
 from mjlab.asset_zoo.robots.engineai_pm01.pm01_8 import (
   EFFORT_LIMIT_Q25,
   PM_Q25_ACTUATOR_INDICES,
 )
 from mjlab.envs import ManagerBasedRlEnvCfg
+from mjlab.envs.amp import AMPCfg
 from mjlab.envs.mdp.actions import JointPositionActionCfg
 from mjlab.managers.manager_term_config import (
-  CurriculumTermCfg,
   ActionTermCfg,
+  CurriculumTermCfg,
   EventTermCfg,
   ObservationGroupCfg,
   ObservationTermCfg,
@@ -24,13 +23,11 @@ from mjlab.managers.manager_term_config import (
 from mjlab.managers.scene_entity_config import SceneEntityCfg
 from mjlab.scene import SceneCfg
 from mjlab.sim import MujocoCfg, SimulationCfg
-from mjlab.envs.amp import AMPCfg
 from mjlab.tasks.fall import mdp
 from mjlab.tasks.fall.mdp.curriculums import (
   q25_effort_limit_curriculum,
   reset_force_pulse_curriculum,
   reset_initialization_curriculum,
-  reset_push_curriculum,
   task_reward_weight_curriculum,
 )
 from mjlab.tasks.fall.mdp.events import (
@@ -176,6 +173,16 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
         "data_min_root_height": 0.25,
         "data_max_abs_joint_velocity": 40.0,
         "data_low_clearance_height": 0.35,
+        # Keep uniform/curriculum sampling as the exploration floor while
+        # replaying neighborhoods of safety-critical terminated episodes.
+        "adaptive_sampling": True,
+        "adaptive_buffer_size": 4096,
+        "adaptive_replay_probability": 0.5,
+        "adaptive_min_failures": 1,
+        "adaptive_neighbor_scale": 0.15,
+        "adaptive_failure_term_names": (
+          "forbidden_body_contact_force",
+        ),
       },
     ),
     # Apply an extra reset push only to non-data initializations so motion-derived

@@ -7,6 +7,7 @@ import torch
 
 from mjlab.entity import Entity
 from mjlab.managers.scene_entity_config import SceneEntityCfg
+from mjlab.tasks.fall.mdp.adaptive_sampling import FallAdaptiveResetSampler
 from mjlab.utils.lab_api.math import (
   quat_apply,
   quat_apply_inverse,
@@ -33,6 +34,7 @@ _FORCE_PULSE_COOLDOWN_STEPS_LEFT_ATTR = "_fall_force_pulse_cooldown_steps_left"
 _DATA_RESET_OBS_PENDING_ATTR = "_fall_data_reset_obs_pending"
 _DATA_RESET_POOL_ROW_ATTR = "_fall_data_reset_pool_row"
 _DATA_RESET_MOTION_POOL_ATTR = "_fall_data_reset_motion_pool"
+_ADAPTIVE_SAMPLER_ATTR = "_fall_adaptive_reset_sampler"
 _PRE_SWITCH_HISTORY_SUFFIXES = ("m4", "m3", "m2", "m1")
 _INV_SQRT_2 = 2.0**-0.5
 _DIRECTION_VECTORS_W = {
@@ -45,6 +47,43 @@ _DIRECTION_VECTORS_W = {
   "right": (0.0, -1.0, 0.0),
   "forward_right": (_INV_SQRT_2, -_INV_SQRT_2, 0.0),
 }
+
+
+def _get_adaptive_sampler(
+  env: ManagerBasedRlEnv,
+  capacity: int,
+  replay_probability: float,
+  min_failures: int,
+  neighbor_scale: float,
+) -> FallAdaptiveResetSampler:
+  sampler = getattr(env, _ADAPTIVE_SAMPLER_ATTR, None)
+  if not isinstance(sampler, FallAdaptiveResetSampler):
+    sampler = FallAdaptiveResetSampler(
+      env=env,
+      capacity=capacity,
+      replay_probability=replay_probability,
+      min_failures=min_failures,
+      neighbor_scale=neighbor_scale,
+    )
+    setattr(env, _ADAPTIVE_SAMPLER_ATTR, sampler)
+  else:
+    sampler.replay_probability = float(replay_probability)
+    sampler.min_failures = max(int(min_failures), 1)
+    sampler.neighbor_scale = max(float(neighbor_scale), 0.0)
+  return sampler
+
+
+def _adaptive_failure_mask(
+  env: ManagerBasedRlEnv,
+  env_ids: torch.Tensor,
+  term_names: Sequence[str],
+) -> torch.Tensor:
+  failed = torch.zeros(len(env_ids), dtype=torch.bool, device=env.device)
+  active_terms = set(env.termination_manager.active_terms)
+  for term_name in term_names:
+    if term_name in active_terms:
+      failed |= env.termination_manager.get_term(term_name)[env_ids]
+  return failed
 
 
 def _normalize_quat(quat: torch.Tensor) -> torch.Tensor:
@@ -539,6 +578,83 @@ def _sample_tilt_states(
   return root_state, joint_pos, joint_vel
 
 
+def _sample_near_random_failure_states(
+  env: ManagerBasedRlEnv,
+  asset: Entity,
+  env_ids: torch.Tensor,
+  prototype_root_state_rel: torch.Tensor,
+  prototype_joint_pos: torch.Tensor,
+  prototype_joint_vel: torch.Tensor,
+  tilt_pose_range: dict[str, tuple[float, float]],
+  tilt_velocity_range: dict[str, tuple[float, float]] | None,
+  tilt_joint_position_range: tuple[float, float],
+  tilt_joint_velocity_range: tuple[float, float],
+  neighbor_scale: float,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+  """Sample a local neighborhood around a failed random-reset condition."""
+  root_state = prototype_root_state_rel.clone()
+  root_state[:, 0:3] += env.scene.env_origins[env_ids]
+  joint_pos = prototype_joint_pos.clone()
+  joint_vel = prototype_joint_vel.clone()
+
+  pose_ranges = torch.tensor(
+    [
+      tilt_pose_range.get(key, (0.0, 0.0))
+      for key in ("x", "y", "z", "roll", "pitch", "yaw")
+    ],
+    device=env.device,
+    dtype=torch.float32,
+  )
+  pose_jitter = sample_uniform(
+    pose_ranges[:, 0], pose_ranges[:, 1], (len(env_ids), 6), device=env.device
+  ) * float(neighbor_scale)
+  root_state[:, 0:3] += pose_jitter[:, 0:3]
+  root_state[:, 3:7] = quat_mul(
+    root_state[:, 3:7],
+    quat_from_euler_xyz(
+      pose_jitter[:, 3], pose_jitter[:, 4], pose_jitter[:, 5]
+    ),
+  )
+  root_state[:, 3:7] = _normalize_quat(root_state[:, 3:7])
+
+  if tilt_velocity_range is None:
+    tilt_velocity_range = {}
+  velocity_ranges = torch.tensor(
+    [
+      tilt_velocity_range.get(key, (0.0, 0.0))
+      for key in ("x", "y", "z", "roll", "pitch", "yaw")
+    ],
+    device=env.device,
+    dtype=torch.float32,
+  )
+  velocity_jitter = sample_uniform(
+    velocity_ranges[:, 0],
+    velocity_ranges[:, 1],
+    (len(env_ids), 6),
+    device=env.device,
+  ) * float(neighbor_scale)
+  root_state[:, 7:13] += velocity_jitter
+
+  joint_pos += sample_uniform(
+    tilt_joint_position_range[0],
+    tilt_joint_position_range[1],
+    joint_pos.shape,
+    device=env.device,
+  ) * float(neighbor_scale)
+  joint_vel += sample_uniform(
+    tilt_joint_velocity_range[0],
+    tilt_joint_velocity_range[1],
+    joint_vel.shape,
+    device=env.device,
+  ) * float(neighbor_scale)
+
+  soft_joint_pos_limits = asset.data.soft_joint_pos_limits
+  assert soft_joint_pos_limits is not None
+  joint_limits = soft_joint_pos_limits[env_ids]
+  joint_pos = joint_pos.clamp_(joint_limits[..., 0], joint_limits[..., 1])
+  return root_state, joint_pos, joint_vel
+
+
 def _zero_low_clearance_pose_tilt(
   pose_samples: torch.Tensor,
   root_height: torch.Tensor,
@@ -566,7 +682,15 @@ def _sample_motion_states(
   data_low_clearance_height: float | None,
   asset_name: str,
   use_data_reset_obs_history: bool,
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+  state_ids: torch.Tensor | None = None,
+  perturbation_scale: torch.Tensor | None = None,
+) -> tuple[
+  torch.Tensor,
+  torch.Tensor,
+  torch.Tensor,
+  torch.Tensor,
+  torch.Tensor,
+]:
   root_ids, _ = asset.find_bodies((data_root_body_name,), preserve_order=True)
   if not root_ids:
     raise ValueError(
@@ -589,12 +713,29 @@ def _sample_motion_states(
   if root_state_pool.shape[0] == 0:
     raise ValueError("data reset requested but loaded motion files contain no states.")
 
-  state_ids = torch.randint(
-    low=0,
-    high=root_state_pool.shape[0],
-    size=(len(env_ids),),
-    device=env.device,
-  )
+  if state_ids is None:
+    state_ids = torch.randint(
+      low=0,
+      high=root_state_pool.shape[0],
+      size=(len(env_ids),),
+      device=env.device,
+    )
+  else:
+    state_ids = state_ids.to(device=env.device, dtype=torch.long).clone()
+    invalid_state = (state_ids < 0) | (state_ids >= root_state_pool.shape[0])
+    if invalid_state.any():
+      state_ids[invalid_state] = torch.randint(
+        low=0,
+        high=root_state_pool.shape[0],
+        size=(int(invalid_state.sum().item()),),
+        device=env.device,
+      )
+  if perturbation_scale is None:
+    perturbation_scale = torch.ones(len(env_ids), device=env.device)
+  else:
+    perturbation_scale = perturbation_scale.to(
+      device=env.device, dtype=torch.float32
+    )
   if _root_state_is_placeholder(root_state_pool):
     default_root_state = asset.data.default_root_state
     assert default_root_state is not None
@@ -620,6 +761,7 @@ def _sample_motion_states(
   pose_samples = sample_uniform(
     pose_ranges[:, 0], pose_ranges[:, 1], (len(env_ids), 6), device=env.device
   )
+  pose_samples *= perturbation_scale.unsqueeze(-1)
   root_height = root_state[:, 2] - env.scene.env_origins[env_ids, 2]
   _zero_low_clearance_pose_tilt(
     pose_samples, root_height, data_low_clearance_height
@@ -646,20 +788,23 @@ def _sample_motion_states(
   vel_samples = sample_uniform(
     vel_ranges[:, 0], vel_ranges[:, 1], (len(env_ids), 6), device=env.device
   )
+  vel_samples *= perturbation_scale.unsqueeze(-1)
   root_state[:, 7:13] += vel_samples
 
-  joint_pos += sample_uniform(
+  joint_pos_noise = sample_uniform(
     data_joint_position_range[0],
     data_joint_position_range[1],
     joint_pos.shape,
     device=env.device,
   )
-  joint_vel += sample_uniform(
+  joint_vel_noise = sample_uniform(
     data_joint_velocity_range[0],
     data_joint_velocity_range[1],
     joint_vel.shape,
     device=env.device,
   )
+  joint_pos += joint_pos_noise * perturbation_scale.unsqueeze(-1)
+  joint_vel += joint_vel_noise * perturbation_scale.unsqueeze(-1)
 
   soft_joint_pos_limits = asset.data.soft_joint_pos_limits
   assert soft_joint_pos_limits is not None
@@ -674,7 +819,7 @@ def _sample_motion_states(
       motion_pool=motion_pool,
     )
   push_direction_w = motion_pool["push_direction_w"][state_ids]
-  return root_state, joint_pos, joint_vel, push_direction_w
+  return root_state, joint_pos, joint_vel, push_direction_w, state_ids
 
 
 def _init_data_reset_obs_history_state(env: ManagerBasedRlEnv) -> None:
@@ -859,13 +1004,38 @@ def reset_root_state_mixed(
   data_max_abs_joint_velocity: float | None = None,
   data_low_clearance_height: float | None = None,
   use_data_reset_obs_history: bool = False,
+  adaptive_sampling: bool = False,
+  adaptive_buffer_size: int = 4096,
+  adaptive_replay_probability: float = 0.5,
+  adaptive_min_failures: int = 1,
+  adaptive_neighbor_scale: float = 0.15,
+  adaptive_failure_term_names: Sequence[str] = (
+    "forbidden_body_contact_force",
+  ),
   asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
 ) -> None:
-  """Reset robot using a mixture of dangerous tilt states and motion data states."""
+  """Reset from data/random states, optionally replaying failed neighborhoods."""
   if env_ids is None:
     env_ids = torch.arange(env.num_envs, device=env.device, dtype=torch.int)
+  else:
+    env_ids = env_ids.to(device=env.device, dtype=torch.long)
   if len(env_ids) == 0:
     return
+
+  asset: Entity = env.scene[asset_cfg.name]
+  sampler: FallAdaptiveResetSampler | None = None
+  if adaptive_sampling:
+    sampler = _get_adaptive_sampler(
+      env=env,
+      capacity=adaptive_buffer_size,
+      replay_probability=adaptive_replay_probability,
+      min_failures=adaptive_min_failures,
+      neighbor_scale=adaptive_neighbor_scale,
+    )
+    sampler.capture_failures(
+      env_ids,
+      _adaptive_failure_mask(env, env_ids, adaptive_failure_term_names),
+    )
 
   reset_data_mask = torch.zeros(env.num_envs, dtype=torch.bool, device=env.device)
   setattr(env, _LAST_RESET_DATA_MASK_ATTR, reset_data_mask)
@@ -887,12 +1057,41 @@ def reset_root_state_mixed(
   pending[env_ids] = False
   pool_row[env_ids] = -1
 
-  asset: Entity = env.scene[asset_cfg.name]
   use_data = torch.zeros(len(env_ids), dtype=torch.bool, device=env.device)
   if motion_files and data_probability > 0.0:
     use_data = torch.rand(len(env_ids), device=env.device) < float(data_probability)
 
-  tilt_env_ids = env_ids[~use_data]
+  if sampler is not None:
+    replay_samples = sampler.sample_for_sources(env_ids, use_data)
+  else:
+    replay_samples = {
+      "use_replay": torch.zeros(
+        len(env_ids), dtype=torch.bool, device=env.device
+      ),
+      "root_state_rel": torch.zeros(len(env_ids), 13, device=env.device),
+      "joint_pos": torch.zeros(
+        len(env_ids), asset.num_joints, device=env.device
+      ),
+      "joint_vel": torch.zeros(
+        len(env_ids), asset.num_joints, device=env.device
+      ),
+      "data_state_id": torch.full(
+        (len(env_ids),), -1, dtype=torch.long, device=env.device
+      ),
+      "reset_push": torch.zeros(len(env_ids), 6, device=env.device),
+    }
+
+  episode_root_state = torch.zeros(len(env_ids), 13, device=env.device)
+  episode_joint_pos = torch.zeros(
+    len(env_ids), asset.num_joints, device=env.device
+  )
+  episode_joint_vel = torch.zeros_like(episode_joint_pos)
+  episode_data_state_ids = torch.full(
+    (len(env_ids),), -1, dtype=torch.long, device=env.device
+  )
+
+  tilt_local_ids = torch.nonzero(~use_data, as_tuple=False).squeeze(-1)
+  tilt_env_ids = env_ids[tilt_local_ids]
   if tilt_env_ids.numel() > 0:
     tilt_root, tilt_joint_pos, tilt_joint_vel = _sample_tilt_states(
       env=env,
@@ -903,14 +1102,52 @@ def reset_root_state_mixed(
       tilt_joint_position_range=tilt_joint_position_range,
       tilt_joint_velocity_range=tilt_joint_velocity_range,
     )
+    tilt_replay_mask = replay_samples["use_replay"][tilt_local_ids]
+    if tilt_replay_mask.any():
+      replay_local_ids = tilt_local_ids[tilt_replay_mask]
+      replay_env_ids = env_ids[replay_local_ids]
+      replay_root, replay_joint_pos, replay_joint_vel = (
+        _sample_near_random_failure_states(
+          env=env,
+          asset=asset,
+          env_ids=replay_env_ids,
+          prototype_root_state_rel=replay_samples["root_state_rel"][
+            replay_local_ids
+          ],
+          prototype_joint_pos=replay_samples["joint_pos"][replay_local_ids],
+          prototype_joint_vel=replay_samples["joint_vel"][replay_local_ids],
+          tilt_pose_range=tilt_pose_range,
+          tilt_velocity_range=tilt_velocity_range,
+          tilt_joint_position_range=tilt_joint_position_range,
+          tilt_joint_velocity_range=tilt_joint_velocity_range,
+          neighbor_scale=adaptive_neighbor_scale,
+        )
+      )
+      tilt_root[tilt_replay_mask] = replay_root
+      tilt_joint_pos[tilt_replay_mask] = replay_joint_pos
+      tilt_joint_vel[tilt_replay_mask] = replay_joint_vel
     _write_state_and_forward(
       env, asset, tilt_env_ids, tilt_root, tilt_joint_pos, tilt_joint_vel
     )
+    episode_root_state[tilt_local_ids] = tilt_root
+    episode_joint_pos[tilt_local_ids] = tilt_joint_pos
+    episode_joint_vel[tilt_local_ids] = tilt_joint_vel
 
-  data_env_ids = env_ids[use_data]
+  data_local_ids = torch.nonzero(use_data, as_tuple=False).squeeze(-1)
+  data_env_ids = env_ids[data_local_ids]
   if data_env_ids.numel() > 0:
     reset_data_mask[data_env_ids] = True
-    data_root, data_joint_pos, data_joint_vel, data_direction_w = _sample_motion_states(
+    requested_state_ids = replay_samples["data_state_id"][data_local_ids]
+    perturbation_scale = torch.ones(len(data_env_ids), device=env.device)
+    data_replay_mask = replay_samples["use_replay"][data_local_ids]
+    perturbation_scale[data_replay_mask] = float(adaptive_neighbor_scale)
+    (
+      data_root,
+      data_joint_pos,
+      data_joint_vel,
+      data_direction_w,
+      data_state_ids,
+    ) = _sample_motion_states(
       env=env,
       asset=asset,
       env_ids=data_env_ids,
@@ -925,10 +1162,28 @@ def reset_root_state_mixed(
       data_low_clearance_height=data_low_clearance_height,
       asset_name=asset_cfg.name,
       use_data_reset_obs_history=use_data_reset_obs_history,
+      state_ids=requested_state_ids,
+      perturbation_scale=perturbation_scale,
     )
     reset_data_direction_w[data_env_ids] = data_direction_w
     _write_state_and_forward(
       env, asset, data_env_ids, data_root, data_joint_pos, data_joint_vel
+    )
+    episode_root_state[data_local_ids] = data_root
+    episode_joint_pos[data_local_ids] = data_joint_pos
+    episode_joint_vel[data_local_ids] = data_joint_vel
+    episode_data_state_ids[data_local_ids] = data_state_ids
+
+  if sampler is not None:
+    sampler.begin_episodes(
+      env=env,
+      env_ids=env_ids,
+      data_mask=use_data,
+      replay_samples=replay_samples,
+      root_state=episode_root_state,
+      joint_pos=episode_joint_pos,
+      joint_vel=episode_joint_vel,
+      data_state_ids=episode_data_state_ids,
     )
 
 
@@ -940,6 +1195,7 @@ def push_by_setting_velocity_preserve_data(
   asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
 ) -> None:
   """Apply reset push without modifying envs initialized from motion data."""
+  sampler = getattr(env, _ADAPTIVE_SAMPLER_ATTR, None)
   if preserve_data_reset_states:
     data_mask = getattr(env, _LAST_RESET_DATA_MASK_ATTR, None)
     if data_mask is not None:
@@ -949,14 +1205,33 @@ def push_by_setting_velocity_preserve_data(
     return
 
   asset: Entity = env.scene[asset_cfg.name]
-  vel_w = asset.data.root_link_vel_w[env_ids]
   range_list = [
     velocity_range.get(key, (0.0, 0.0))
     for key in ["x", "y", "z", "roll", "pitch", "yaw"]
   ]
-  ranges = torch.tensor(range_list, device=env.device)
-  vel_w += sample_uniform(ranges[:, 0], ranges[:, 1], vel_w.shape, device=env.device)
+  ranges = torch.tensor(range_list, device=env.device, dtype=torch.float32)
+  velocity_delta = sample_uniform(
+    ranges[:, 0], ranges[:, 1], (len(env_ids), 6), device=env.device
+  )
+  if isinstance(sampler, FallAdaptiveResetSampler):
+    replay_mask = (
+      sampler.current_replayed[env_ids]
+      & ~sampler.current_data_mask[env_ids]
+    )
+    if replay_mask.any():
+      replay_env_ids = env_ids[replay_mask]
+      replay_delta = sampler.replay_reset_push[replay_env_ids]
+      local_jitter = sample_uniform(
+        ranges[:, 0],
+        ranges[:, 1],
+        (len(replay_env_ids), 6),
+        device=env.device,
+      ) * sampler.neighbor_scale
+      velocity_delta[replay_mask] = replay_delta + local_jitter
+  vel_w = asset.data.root_link_vel_w[env_ids] + velocity_delta
   asset.write_root_link_velocity_to_sim(vel_w, env_ids=env_ids)
+  if isinstance(sampler, FallAdaptiveResetSampler):
+    sampler.record_reset_push(env_ids, velocity_delta)
 
 
 def apply_external_force_torque_axiswise(
