@@ -23,12 +23,16 @@ from mjlab.tasks.fall.fall_env_cfg import make_fall_env_cfg
 
 
 def _last_stage_at_start(stage: dict) -> dict:
-  """Return a shallow copy of a curriculum stage active from finetune step 0."""
+  """Return a shallow copy of a curriculum stage active from step 0."""
   return {**stage, "step": 0}
 
 
-def _freeze_curriculum_to_final_stage(cfg: ManagerBasedRlEnvCfg) -> None:
-  """Start finetuning with each enabled curriculum at its final base-training stage."""
+def freeze_curriculum_to_final_stage(cfg: ManagerBasedRlEnvCfg) -> None:
+  """Keep each enabled curriculum term at its final base-training stage.
+
+  Useful when resuming late-stage training: ``common_step_counter`` resets to 0
+  in a new process, which would otherwise rewind staged curricula.
+  """
   if cfg.curriculum is None:
     return
 
@@ -78,11 +82,14 @@ def pm1_flat_falling_env_cfg(
   use_data_reset: bool = True,
   use_data_reset_obs_history: bool = False,
   protective_finetune: bool = False,
+  freeze_curriculum: bool = False,
 ) -> ManagerBasedRlEnvCfg:
   """Create PM1 flat terrain fall (joint-state tracking) configuration.
 
   has_state_estimation: Kept for API compatibility with tracking; fall policy
     does not use base_lin_vel or motion anchor, so this has no effect.
+  freeze_curriculum: If True, keep curriculum terms at their final stages from
+    step 0 (no protective-finetune reward / robot changes).
   """
   del has_state_estimation  # Unused for fall; policy has no motion anchor / base_lin_vel
   cfg = make_fall_env_cfg()
@@ -180,8 +187,9 @@ def pm1_flat_falling_env_cfg(
   reduce_force_reward = cfg.rewards.get("reduce_contact_force")
   if reduce_force_reward is not None:
     reduce_force_reward.func.body_force_scales = contact_reward_force_scales
+  if freeze_curriculum or protective_finetune:
+    freeze_curriculum_to_final_stage(cfg)
   if protective_finetune:
-    _freeze_curriculum_to_final_stage(cfg)
     cfg.rewards["protective_contact"] = RewardTermCfg(
       func=mdp.ProtectiveContactReward(
         sensor_name="body_contact_force",

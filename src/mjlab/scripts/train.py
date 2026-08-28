@@ -213,6 +213,8 @@ class TrainConfig:
   enable_nan_guard: bool = False
   torchrunx_log_dir: str | None = None
   wandb_run_path: str | None = None
+  freeze_curriculum: bool = False
+  """If True, keep fall curricula at their final stages from step 0."""
   gpu_ids: list[int] | Literal["all"] | None = field(default_factory=lambda: [0])
 
   @staticmethod
@@ -229,7 +231,13 @@ def run_train(task_id: str, cfg: TrainConfig, log_dir: Path) -> None:
     os.environ["WANDB_ENTITY"] = "e1519767-national-university-of-singapore"
   if "WANDB_PROJECT" not in os.environ:
     os.environ["WANDB_PROJECT"] = cfg.agent.wandb_project
-  
+
+  if cfg.freeze_curriculum:
+    from mjlab.tasks.fall.config.pm1.env_cfgs import freeze_curriculum_to_final_stage
+
+    freeze_curriculum_to_final_stage(cfg.env)
+    print("[INFO] freeze_curriculum=True: curricula locked to final stages.")
+
   cuda_visible = os.environ.get("CUDA_VISIBLE_DEVICES", "")
   if cuda_visible == "":
     device = "cpu"
