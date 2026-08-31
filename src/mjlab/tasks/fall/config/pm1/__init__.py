@@ -2,6 +2,10 @@ from mjlab.tasks.registry import register_mjlab_task
 from mjlab.tasks.fall.rl import FallOnPolicyRunner
 from mjlab.rl.mj_amp_runner import MjlabAmpOnPolicyRunner
 
+from .dodge_env_cfg import (
+  pm1_falling_amp_dodge_runner_cfg,
+  pm1_flat_falling_dodge_env_cfg,
+)
 from .env_cfgs import pm1_flat_falling_env_cfg
 from .rl_cfg import (
   pm1_falling_amp_protective_finetune_runner_cfg,
@@ -54,5 +58,13 @@ register_mjlab_task(
   env_cfg=pm1_flat_falling_env_cfg(protective_finetune=True),
   play_env_cfg=pm1_flat_falling_env_cfg(play=True, protective_finetune=True),
   rl_cfg=pm1_falling_amp_protective_finetune_runner_cfg(),
+  runner_cls=MjlabAmpOnPolicyRunner,
+)
+
+register_mjlab_task(
+  task_id="Mjlab-Falling-Flat-PM1-AMP-Dodge",
+  env_cfg=pm1_flat_falling_dodge_env_cfg(),
+  play_env_cfg=pm1_flat_falling_dodge_env_cfg(play=True),
+  rl_cfg=pm1_falling_amp_dodge_runner_cfg(),
   runner_cls=MjlabAmpOnPolicyRunner,
 )
