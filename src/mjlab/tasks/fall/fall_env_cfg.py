@@ -83,7 +83,7 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
       func=mdp.last_action,
       history_length=5,
       flatten_history_dim=True,
-      ),
+    ),
   }
 
   # Critic: same as actor plus privileged base (shorter history for speed).
@@ -180,9 +180,7 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
         "adaptive_replay_probability": 0.5,
         "adaptive_min_failures": 1,
         "adaptive_neighbor_scale": 0.15,
-        "adaptive_failure_term_names": (
-          "forbidden_body_contact_force",
-        ),
+        "adaptive_failure_term_names": ("forbidden_body_contact_force",),
       },
     ),
     # Apply an extra reset push only to non-data initializations so motion-derived
@@ -667,7 +665,8 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
       # Keep root z for fall-state awareness, but drop root x/y and root 6D
       # orientation so the discriminator cannot separate expert/policy too
       # easily using obvious global pose shortcuts.
-      num_disc_obs_steps=2,  # 52-dim per step with current settings
+      # State history is followed by one shared 8-way direction label.
+      num_disc_obs_steps=2,
       asset_name="robot",
       root_body_name="LINK_BASE",
       motion_file=None,
@@ -677,6 +676,16 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
       include_root_rot=False,
       include_root_vel=True,
       include_projected_gravity=False,
+      # Condition the discriminator on a coarse categorical direction instead
+      # of exposing the continuous gravity projection from sparse demos.
+      include_fall_direction_obs=True,
+      # Confirm the initial fall over a short window, then keep the category
+      # fixed for the whole episode, including landing and subsequent rolls.
+      fall_direction_confirm_steps=5,
+      fall_direction_min_tilt_rad=0.15,
+      fall_direction_min_speed=0.2,
+      fall_direction_min_displacement=0.03,
+      fall_direction_min_coherence=0.8,
       disc_body_pos_b_link_names=(
         # "LINK_ANKLE_ROLL_L",
         # "LINK_ANKLE_ROLL_R",

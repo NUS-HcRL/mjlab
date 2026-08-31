@@ -1,6 +1,5 @@
 """PM1 flat fall environment configurations."""
 
-from itertools import filterfalse
 from pathlib import Path
 
 from mjlab.asset_zoo.robots import (
@@ -169,8 +168,6 @@ def pm1_flat_falling_env_cfg(
     **forbidden_reward_force_thresholds,
     "LINK_SHOULDER_ROLL_L": 500.0,
     "LINK_SHOULDER_ROLL_R": 500.0,
-    "LINK_SHOULDER_YAW_L": 500.0,
-    "LINK_SHOULDER_YAW_R": 500.0,
   }
   cfg.terminations["forbidden_body_contact_force"].params[
     "body_names"
@@ -245,6 +242,16 @@ def pm1_flat_falling_env_cfg(
       "motion_file/pm_fall4:v0/RightFront_3_converted.npz",
       "motion_file/pm_fall4:v0/RightBack_3_converted.npz",
     ]
+    cfg.amp.motion_fall_directions = (
+      "backward",
+      "forward",
+      "left",
+      "right",
+      "forward_left",
+      "backward_left",
+      "forward_right",
+      "backward_right",
+    )
 
   # PM1 IMU 传感器名与 G1 不同：imu_angular_velocity / imu_link_linear_velocity
   for group in ("policy", "critic"):
