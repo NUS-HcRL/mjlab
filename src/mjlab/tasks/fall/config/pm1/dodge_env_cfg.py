@@ -8,6 +8,7 @@ from mjlab.tasks.fall.mdp.dodge import (
   DodgeRegionCommandCfg,
   dodge_region_contact_cost,
   dodge_region_observation,
+  dodge_region_proximity_risk,
 )
 
 from .env_cfgs import pm1_flat_falling_env_cfg
@@ -30,7 +31,8 @@ def pm1_flat_falling_dodge_env_cfg(
     cfg.observations[group].terms["dodge_region"] = ObservationTermCfg(
       func=dodge_region_observation,
       params={"command_name": "dodge"},
-      history_length=0,  # Current frame only; old proprioception histories unchanged.
+      history_length=3,
+      flatten_history_dim=True,
     )
 
   # Keep the original ground force sensor untouched. This sensor includes feet
@@ -41,15 +43,20 @@ def pm1_flat_falling_dodge_env_cfg(
       name="dodge_ground_contact",
       primary=ContactMatch(mode="body", pattern=r"^LINK_.*$", entity="robot"),
       secondary=ContactMatch(mode="body", pattern="terrain"),
-      fields=("found", "force", "pos"),
+      fields=("found", "pos"),
       reduce="maxforce",
-      num_slots=8,
+      num_slots=4,
     ),
   )
   cfg.rewards["dodge_region_contact"] = RewardTermCfg(
     func=dodge_region_contact_cost,
     weight=-1.0,
     params={"command_name": "dodge", "sensor_name": "dodge_ground_contact"},
+  )
+  cfg.rewards["dodge_region_proximity"] = RewardTermCfg(
+    func=dodge_region_proximity_risk,
+    weight=-0.05,
+    params={"command_name": "dodge", "asset_name": "robot"},
   )
   return cfg
 

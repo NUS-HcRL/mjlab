@@ -326,36 +326,36 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
       ),
       weight=1.0,
     ),
-    "control_descent_speed": RewardTermCfg(
-      func=mdp.control_descent_speed,
-      weight=1,
-      params={
-        "torso_body_name": "LINK_TORSO_YAW",
-        "threshold": 0.5,
-      },
-    ),
-    "impact_velocity_reward": RewardTermCfg(
-      func=mdp.ImpactVelocityReward(
-        sensor_name="body_contact_force",
-        high_weight_bodies=(
-          "LINK_ELBOW_END_L",
-          "LINK_ELBOW_END_R",
-          "LINK_HEAD_YAW",
-          "LINK_TORSO_YAW",
-        ),
-        medium_weight_bodies=(
-          "LINK_SHOULDER_ROLL_L",
-          "LINK_SHOULDER_ROLL_R",
-          "LINK_SHOULDER_YAW_L",
-          "LINK_SHOULDER_YAW_R",
-        ),
-        high_weight=20.0,
-        medium_weight=10.0,
-        low_weight=0.5,
-        squash_scale=0.02,
-      ),
-      weight=1,
-    ),
+    # "control_descent_speed": RewardTermCfg(
+    #   func=mdp.control_descent_speed,
+    #   weight=1,
+    #   params={
+    #     "torso_body_name": "LINK_TORSO_YAW",
+    #     "threshold": 0.5,
+    #   },
+    # ),
+    # "impact_velocity_reward": RewardTermCfg(
+    #   func=mdp.ImpactVelocityReward(
+    #     sensor_name="body_contact_force",
+    #     high_weight_bodies=(
+    #       "LINK_ELBOW_END_L",
+    #       "LINK_ELBOW_END_R",
+    #       "LINK_HEAD_YAW",
+    #       "LINK_TORSO_YAW",
+    #     ),
+    #     medium_weight_bodies=(
+    #       "LINK_SHOULDER_ROLL_L",
+    #       "LINK_SHOULDER_ROLL_R",
+    #       "LINK_SHOULDER_YAW_L",
+    #       "LINK_SHOULDER_YAW_R",
+    #     ),
+    #     high_weight=20.0,
+    #     medium_weight=10.0,
+    #     low_weight=0.5,
+    #     squash_scale=0.02,
+    #   ),
+    #   weight=1,
+    # ),
     "lower_then_upper_contact": RewardTermCfg(
       func=mdp.LowerBodyThenUpperBodyContactReward(
         sensor_name="body_contact_force",
@@ -393,15 +393,15 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
       ),
       weight=0.05,
     ),
-    "motor_overcurrent": RewardTermCfg(
-      func=mdp.motor_overcurrent_penalty,
-      weight=1e-3,
-      params={
-        "command_name": "motion",
-        "scale": 1.0,
-        "threshold": 1.0,
-      },
-    ),
+    # "motor_overcurrent": RewardTermCfg(
+    #   func=mdp.motor_overcurrent_penalty,
+    #   weight=1e-3,
+    #   params={
+    #     "command_name": "motion",
+    #     "scale": 1.0,
+    #     "threshold": 1.0,
+    #   },
+    # ),
   }
 
   ##

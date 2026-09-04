@@ -138,10 +138,10 @@ def pm1_flat_falling_env_cfg(
     "LINK_ELBOW_END_R",
   )
   forbidden_body_force_thresholds = {
-    "LINK_HEAD_YAW": 500.0,
-    "LINK_TORSO_YAW": 500.0,
-    "LINK_ELBOW_END_L": 500.0,
-    "LINK_ELBOW_END_R": 500.0,
+    "LINK_HEAD_YAW": 400.0,
+    "LINK_TORSO_YAW": 800.0,
+    "LINK_ELBOW_END_L": 400.0,
+    "LINK_ELBOW_END_R": 400.0,
     "LINK_SHOULDER_ROLL_L": 800.0,
     "LINK_SHOULDER_ROLL_R": 800.0,
   }
