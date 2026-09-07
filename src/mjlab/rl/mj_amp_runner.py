@@ -212,7 +212,9 @@ class MjlabAmpOnPolicyRunner:
         self.writer = WandbSummaryWriter(
           log_dir=self.log_dir, flush_secs=10, cfg=self.cfg
         )
-        update_run_name_with_sequence(prefix=self.cfg["wandb_kwargs"]["project"])
+        # Prefer agent run_name as sequential prefix (e.g. dodge1); else project.
+        name_prefix = self.cfg.get("run_name") or self.cfg["wandb_kwargs"]["project"]
+        update_run_name_with_sequence(prefix=name_prefix)
         self.writer.log_config(
           self.env.cfg, self.cfg, self.alg_cfg, self.policy_cfg
         )

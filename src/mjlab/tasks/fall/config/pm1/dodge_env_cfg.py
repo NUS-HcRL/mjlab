@@ -74,4 +74,6 @@ def pm1_falling_amp_dodge_runner_cfg() -> RslRlOnPolicyRunnerCfg:
   cfg.algorithm.kl_early_stop = True
   cfg.algorithm.kl_early_stop_multiplier = 2.0
   cfg.experiment_name = "pm1_falling_amp_dodge"
+  # W&B sequential run names become dodge1, dodge2, ... (not mjlab1, ...).
+  cfg.run_name = "dodge"
   return cfg

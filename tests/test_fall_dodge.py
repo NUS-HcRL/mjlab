@@ -322,7 +322,9 @@ def test_registry_and_runner_apply_only_dodge_amp_overrides():
   assert snapshot(runner) == snapshot(load_rl_cfg(task))
   base = pm1_falling_amp_runner_cfg()
   assert runner.experiment_name != base.experiment_name
+  assert runner.run_name == "dodge"
   runner.experiment_name = base.experiment_name
+  runner.run_name = base.run_name
   assert runner.algorithm.kl_early_stop is True
   assert runner.algorithm.kl_early_stop_multiplier == 2.0
   runner.algorithm.kl_early_stop = base.algorithm.kl_early_stop
