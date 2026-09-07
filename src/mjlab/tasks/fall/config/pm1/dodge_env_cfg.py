@@ -55,14 +55,16 @@ def pm1_flat_falling_dodge_env_cfg(
   )
   cfg.rewards["dodge_region_proximity"] = RewardTermCfg(
     func=dodge_region_proximity_risk,
-    weight=-0.05,
+    weight=-0.20,
     params={"command_name": "dodge", "asset_name": "robot"},
   )
   return cfg
 
 
 def pm1_falling_amp_dodge_runner_cfg() -> RslRlOnPolicyRunnerCfg:
-  """Use unchanged fall AMP/PPO settings with a separate experiment directory."""
+  """Use fall AMP/PPO settings with Dodge-specific update safeguards."""
   cfg = pm1_falling_amp_runner_cfg()
+  cfg.algorithm.kl_early_stop = True
+  cfg.algorithm.kl_early_stop_multiplier = 2.0
   cfg.experiment_name = "pm1_falling_amp_dodge"
   return cfg

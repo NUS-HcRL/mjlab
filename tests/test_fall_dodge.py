@@ -287,7 +287,7 @@ def test_dodge_only_adds_terms_to_fall(play):
   base = pm1_flat_falling_env_cfg(play=play)
   dodge = pm1_flat_falling_dodge_env_cfg(play=play)
   assert dodge.commands["dodge"].probability == 0.2
-  assert dodge.commands["dodge"].landing_lead_distance == 0.25
+  assert dodge.commands["dodge"].landing_lead_distance == 0.35
   for group in ("policy", "critic"):
     term = dodge.observations[group].terms.pop("dodge_region")
     assert term.history_length == 3 and term.noise is None
@@ -295,7 +295,7 @@ def test_dodge_only_adds_terms_to_fall(play):
   cost = dodge.rewards.pop("dodge_region_contact")
   assert cost.weight < 0
   proximity = dodge.rewards.pop("dodge_region_proximity")
-  assert proximity.weight == -0.05
+  assert proximity.weight == -0.20
   sensor = dodge.scene.sensors[-1]
   assert sensor.primary.exclude == ()
   assert sensor.num_slots == 4
@@ -304,7 +304,7 @@ def test_dodge_only_adds_terms_to_fall(play):
   assert snapshot(dodge) == snapshot(base)
 
 
-def test_registry_and_runner_preserve_original_amp_settings():
+def test_registry_and_runner_apply_only_dodge_amp_overrides():
   task = "Mjlab-Falling-Flat-PM1-AMP-Dodge"
   assert "dodge_region" in load_env_cfg(task).observations["policy"].terms
   assert "dodge_region" in load_env_cfg(task, play=True).observations["policy"].terms
@@ -315,6 +315,10 @@ def test_registry_and_runner_preserve_original_amp_settings():
   base = pm1_falling_amp_runner_cfg()
   assert runner.experiment_name != base.experiment_name
   runner.experiment_name = base.experiment_name
+  assert runner.algorithm.kl_early_stop is True
+  assert runner.algorithm.kl_early_stop_multiplier == 2.0
+  runner.algorithm.kl_early_stop = base.algorithm.kl_early_stop
+  runner.algorithm.kl_early_stop_multiplier = base.algorithm.kl_early_stop_multiplier
   assert snapshot(runner) == snapshot(base)
 
 
