@@ -283,9 +283,17 @@ def snapshot(value):
 
 
 @pytest.mark.parametrize("play", [False, True])
-def test_dodge_only_adds_terms_to_fall(play):
+def test_dodge_only_adds_expected_extensions_to_fall(play):
   base = pm1_flat_falling_env_cfg(play=play)
   dodge = pm1_flat_falling_dodge_env_cfg(play=play)
+  assert base.amp is not None and isinstance(base.amp.motion_file, list)
+  assert dodge.amp is not None and isinstance(dodge.amp.motion_file, list)
+  assert dodge.amp.motion_file == [
+    *base.amp.motion_file,
+    "motion_file/pm_fall4:v0/tofront_dodgeleft_v2.3_50fps.npz",
+    "motion_file/pm_fall4:v0/tofront_dodgeright_v2.3_50fps.npz",
+  ]
+  dodge.amp.motion_file = base.amp.motion_file
   assert dodge.commands["dodge"].probability == 0.2
   assert dodge.commands["dodge"].landing_lead_distance == 0.35
   for group in ("policy", "critic"):

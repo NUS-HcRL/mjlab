@@ -26,6 +26,13 @@ def pm1_flat_falling_dodge_env_cfg(
     use_data_reset=use_data_reset,
     use_data_reset_obs_history=use_data_reset_obs_history,
   )
+  assert cfg.amp is not None and isinstance(cfg.amp.motion_file, list)
+  cfg.amp.motion_file.extend(
+    (
+      "motion_file/pm_fall4:v0/tofront_dodgeleft_v2.3_50fps.npz",
+      "motion_file/pm_fall4:v0/tofront_dodgeright_v2.3_50fps.npz",
+    )
+  )
   cfg.commands = {"dodge": DodgeRegionCommandCfg()}
   for group in ("policy", "critic"):
     cfg.observations[group].terms["dodge_region"] = ObservationTermCfg(
