@@ -312,7 +312,7 @@ def test_dodge_only_adds_expected_extensions_to_fall(play):
   assert snapshot(dodge) == snapshot(base)
 
 
-def test_registry_and_runner_apply_only_dodge_amp_overrides():
+def test_registry_and_runner_preserve_original_amp_settings():
   task = "Mjlab-Falling-Flat-PM1-AMP-Dodge"
   assert "dodge_region" in load_env_cfg(task).observations["policy"].terms
   assert "dodge_region" in load_env_cfg(task, play=True).observations["policy"].terms
@@ -325,10 +325,8 @@ def test_registry_and_runner_apply_only_dodge_amp_overrides():
   assert runner.run_name == "dodge"
   runner.experiment_name = base.experiment_name
   runner.run_name = base.run_name
-  assert runner.algorithm.kl_early_stop is True
-  assert runner.algorithm.kl_early_stop_multiplier == 2.0
+  assert runner.algorithm.kl_early_stop is False
   runner.algorithm.kl_early_stop = base.algorithm.kl_early_stop
-  runner.algorithm.kl_early_stop_multiplier = base.algorithm.kl_early_stop_multiplier
   assert snapshot(runner) == snapshot(base)
 
 
