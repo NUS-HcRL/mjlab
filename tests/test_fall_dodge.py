@@ -301,9 +301,11 @@ def test_dodge_only_adds_expected_extensions_to_fall(play):
     assert term.history_length == 3 and term.noise is None
   dodge.commands = None
   cost = dodge.rewards.pop("dodge_region_contact")
-  assert cost.weight < 0
+  assert cost.weight == -2.0
   proximity = dodge.rewards.pop("dodge_region_proximity")
-  assert proximity.weight == -0.20
+  assert proximity.weight == -0.5
+  assert proximity.params["activation_height"] == 0.50
+  assert proximity.params["distance_scale"] == 0.18
   sensor = dodge.scene.sensors[-1]
   assert sensor.primary.exclude == ()
   assert sensor.num_slots == 4

@@ -57,13 +57,18 @@ def pm1_flat_falling_dodge_env_cfg(
   )
   cfg.rewards["dodge_region_contact"] = RewardTermCfg(
     func=dodge_region_contact_cost,
-    weight=-1.0,
+    weight=-2.0,
     params={"command_name": "dodge", "sensor_name": "dodge_ground_contact"},
   )
   cfg.rewards["dodge_region_proximity"] = RewardTermCfg(
     func=dodge_region_proximity_risk,
-    weight=-0.20,
-    params={"command_name": "dodge", "asset_name": "robot"},
+    weight=-0.5,
+    params={
+      "command_name": "dodge",
+      "asset_name": "robot",
+      "activation_height": 0.50,
+      "distance_scale": 0.18,
+    },
   )
   return cfg
 
