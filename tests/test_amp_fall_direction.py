@@ -17,7 +17,7 @@ from mjlab.envs.amp import (
 from mjlab.utils.lab_api.math import quat_from_angle_axis, quat_from_euler_xyz
 
 
-def _fake_amp_helper(num_envs: int):
+def _fake_amp_helper(num_envs: int, include_direction: bool = True):
   quat = torch.zeros(num_envs, 1, 4)
   quat[..., 0] = 1.0
   data = SimpleNamespace(
@@ -36,7 +36,10 @@ def _fake_amp_helper(num_envs: int):
   )
   helper = AMPHelper(
     env,
-    AMPCfg(root_body_name="root", include_fall_direction_obs=True),
+    AMPCfg(
+      root_body_name="root",
+      include_fall_direction_obs=include_direction,
+    ),
   )
   return helper, data
 
@@ -108,6 +111,20 @@ def test_direction_is_appended_once_per_discriminator_sample():
 
   assert disc_obs.shape == (num_envs, expected_dim)
   assert torch.equal(disc_obs[:, -8:], direction_obs)
+
+
+def test_disabled_direction_keeps_policy_and_demo_observations_unconditional():
+  helper, data = _fake_amp_helper(2, include_direction=False)
+  expected_dim = calc_disc_obs_dim(
+    num_disc_obs_steps=helper._cfg.num_disc_obs_steps,
+    num_joints=data.joint_pos.shape[1],
+    include_fall_direction_obs=False,
+  )
+  helper.update()
+
+  assert helper.get_disc_obs_space().shape == (expected_dim,)
+  assert helper.get_disc_obs().shape == (2, expected_dim)
+  assert helper.fetch_disc_obs_demo(3).shape == (3, expected_dim)
 
 
 def test_policy_direction_preserves_heading_and_fallback_rules():
