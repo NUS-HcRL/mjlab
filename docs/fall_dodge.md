@@ -50,21 +50,22 @@ Sampling settings are exposed under `env.commands.dodge` in the training config.
 | `prediction_height` | `0.35` m | Root height used as the ballistic landing plane |
 | `flight_time_range` | `(0.10, 0.80)` s | Bounds on estimated flight time |
 | `landing_distance_range` | `(0.35, 0.90)` m | Bounds on predicted displacement |
-| `landing_lead_distance` | `0.25` m | Extra distance from the root projection toward the fall direction |
+| `landing_lead_distance` | `0.35` m | Extra distance from the root projection toward the fall direction |
 | `placement_jitter` | `0.12` m | Candidate jitter around the prediction |
 | `min_root_height` | `0.45` m | Suppress regions for late/low reset states |
 | `initial_body_clearance` | `0.18` m | Clearance outside the disc around low body origins |
 | `placement_attempts` | `8` | Candidate locations before disabling the region |
 | reward `dodge_region_contact.weight` | `-1.0` | Bounded contact cost multiplier |
-| reward `dodge_region_proximity.weight` | `-0.05` | Bounded pre-contact risk multiplier |
+| reward `dodge_region_first_contact.weight` | `-0.75` | Fixed once-per-episode penalty for first contact |
+| reward `dodge_predicted_landing_risk.weight` | `-0.5` | Predicted landing risk multiplier |
 
-These are initial implementation defaults, not values selected from W&B tuning.
+These are the current settings after W&B-guided tuning.
 The actual active fraction can be lower than 20%: late fall resets and candidates
 overlapping low bodies are rejected. Existing reset states are never resampled or
 modified to accommodate an obstacle. Placement waits for three completed control
 frames after reset, blends displacement-derived and current root velocity, then
 projects the root ballistically until `prediction_height`. Candidates are jittered
-around a point `0.25 m` beyond that root projection in the fall direction, placing
+around a point `0.35 m` beyond that root projection in the fall direction, placing
 the region closer to the expected hand/forearm landing area. The force pulse can
 still be active during this short window;
 waiting for its full configured duration could make the region appear after impact.
@@ -87,11 +88,16 @@ feet, with four contact slots per body. It exports only `found` and `pos`; the
 original fall sensor continues to supply force. The cost is one if **any valid ground
 contact point** is inside/on the disc, otherwise zero. Multiple contacts do not
 increase this cost. RewardManager multiplies by the negative weight and control
-`dt` (currently `0.02` s), so default contribution is `-0.02` per contacting step.
-The bounded proximity term provides earlier credit only while a body is descending,
-near the floor, and horizontally near the active disc. Its initial `-0.05` weight
-is deliberately small relative to the dominant cached base-run reward terms. The
-original AMP EMA mixing still applies and may react to the added task penalty.
+`dt` (currently `0.02` s), so the duration term contributes `-0.02` per contacting
+step. A separate first-contact term returns `1 / dt` only on the first hit, making
+its configured `-0.75` contribution independent of contact duration.
+
+The predicted landing term ballistically projects the horizontal positions of the
+torso, both knees, and both elbow pitch/end links over `0.05` to `0.45` seconds. It
+applies a smooth risk within a `0.04 m` body margin around the disc and only while
+a tracked link descends. The head is excluded because the existing fall task
+already treats head-ground contact as forbidden. The original AMP EMA mixing still
+applies and may react to the added task penalties.
 
 There is no physical obstacle, new termination, directional pose target, or
 distant-escape bonus. This models avoiding a ground footprint,
@@ -107,8 +113,9 @@ This version makes no continuous collision-detection or safety guarantee.
 
 ## Metrics and evaluation
 
-The new rewards appear under `Episode_Reward/dodge_region_contact` and
-`Episode_Reward/dodge_region_proximity`. Additional
+The new rewards appear under `Episode_Reward/dodge_region_contact`,
+`Episode_Reward/dodge_region_first_contact`, and
+`Episode_Reward/dodge_predicted_landing_risk`. Additional
 completed-episode statistics are under `Metrics/dodge/`:
 
 - `requested_rate`, `active_rate`: sampling and valid placement.
@@ -133,6 +140,7 @@ uv run pytest tests/test_fall_dodge.py tests/test_task_configs.py -q
 ```
 
 The focused tests exercise contact geometry/empty slots, coordinate transforms,
-partial resets, fixed world positions, placement rejection, contact statistics,
-and preservation of original fall/AMP config values. They require the normal
-project Python dependencies even though the tensor checks themselves run on CPU.
+partial resets, fixed world positions, placement rejection, first-contact state,
+predicted landing risk, contact statistics, and preservation of original fall/AMP
+config values. They require the normal project Python dependencies even though the
+tensor checks themselves run on CPU.

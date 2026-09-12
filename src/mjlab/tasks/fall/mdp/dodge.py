@@ -335,31 +335,142 @@ def dodge_region_contact_cost(
   return hit.float()
 
 
-def dodge_region_proximity_risk(
-  env: ManagerBasedRlEnv,
-  command_name: str = "dodge",
-  asset_name: str = "robot",
-  activation_height: float = 0.35,
-  distance_scale: float = 0.12,
-  min_downward_speed: float = 0.05,
-  downward_speed_scale: float = 0.5,
-) -> torch.Tensor:
-  """Soft, bounded pre-contact risk for descending bodies near an active region."""
-  region = cast(DodgeRegionCommand, env.command_manager.get_term(command_name))
-  asset = cast(Entity, env.scene[asset_name])
-  pos = asset.data.body_link_pos_w
-  vel = asset.data.body_link_lin_vel_w
-  ground_z = env.scene.env_origins[:, 2]
+class DodgeFirstContactCost:
+  """Penalize the first region contact once per episode.
 
-  height = (pos[..., 2] - ground_z[:, None]).clamp_min(0.0)
-  height_gate = ((activation_height - height) / activation_height).clamp(0.0, 1.0)
-  downward_gate = (
-    (-vel[..., 2] - min_downward_speed) / downward_speed_scale
-  ).clamp(0.0, 1.0)
-  distance = torch.linalg.vector_norm(
-    pos[..., :2] - region.center_w[:, None, :2], dim=-1
-  )
-  clearance = (distance - region.radius[:, None]).clamp_min(0.0)
-  spatial_gate = torch.exp(-clearance / distance_scale)
-  risk = (height_gate * downward_gate * spatial_gate).max(dim=-1).values
-  return risk * region.active.float()
+  RewardManager multiplies reward terms by ``dt``. Returning ``1 / step_dt``
+  therefore makes the configured weight the fixed penalty for the event instead
+  of making it depend on how long contact lasts.
+  """
+
+  def __init__(
+    self,
+    command_name: str = "dodge",
+    sensor_name: str = "dodge_ground_contact",
+  ) -> None:
+    self.command_name = command_name
+    self.sensor_name = sensor_name
+    self._contacted_once: torch.Tensor | None = None
+
+  def reset(self, env_ids: torch.Tensor | slice | None = None) -> None:
+    if self._contacted_once is None:
+      return
+    if env_ids is None:
+      env_ids = slice(None)
+    self._contacted_once[env_ids] = False
+
+  def __call__(self, env: ManagerBasedRlEnv) -> torch.Tensor:
+    region = cast(
+      DodgeRegionCommand, env.command_manager.get_term(self.command_name)
+    )
+    sensor = cast(ContactSensor, env.scene[self.sensor_name])
+    data = sensor.data
+    assert data.found is not None and data.pos is not None
+    if (
+      self._contacted_once is None
+      or self._contacted_once.shape[0] != env.num_envs
+    ):
+      self._contacted_once = torch.zeros(
+        env.num_envs, dtype=torch.bool, device=env.device
+      )
+    hit = region_contact_mask(
+      region.active, region.center_w, region.radius, data.found, data.pos
+    ).any(dim=-1)
+    first_hit = hit & ~self._contacted_once
+    self._contacted_once |= hit
+    return first_hit.float() / env.step_dt
+
+
+class DodgePredictedLandingRisk:
+  """Predict selected descending links' landing risk around the region."""
+
+  def __init__(
+    self,
+    body_names: tuple[str, ...],
+    command_name: str = "dodge",
+    asset_name: str = "robot",
+    prediction_height: float = 0.10,
+    gravity_magnitude: float = 9.81,
+    flight_time_range: tuple[float, float] = (0.05, 0.45),
+    body_margin: float = 0.04,
+    temperature: float = 0.04,
+    min_downward_speed: float = 0.05,
+    downward_speed_scale: float = 0.5,
+  ) -> None:
+    if not body_names:
+      raise ValueError("body_names must not be empty")
+    lo, hi = flight_time_range
+    if not (math.isfinite(lo) and math.isfinite(hi) and 0 < lo <= hi):
+      raise ValueError("flight_time_range must contain ordered positive values")
+    for name, value in (
+      ("prediction_height", prediction_height),
+      ("body_margin", body_margin),
+      ("min_downward_speed", min_downward_speed),
+    ):
+      if not math.isfinite(value) or value < 0:
+        raise ValueError(f"{name} must be finite and nonnegative")
+    for name, value in (
+      ("gravity_magnitude", gravity_magnitude),
+      ("temperature", temperature),
+      ("downward_speed_scale", downward_speed_scale),
+    ):
+      if not math.isfinite(value) or value <= 0:
+        raise ValueError(f"{name} must be finite and positive")
+    self.body_names = body_names
+    self.command_name = command_name
+    self.asset_name = asset_name
+    self.prediction_height = prediction_height
+    self.gravity_magnitude = gravity_magnitude
+    self.flight_time_range = flight_time_range
+    self.body_margin = body_margin
+    self.temperature = temperature
+    self.min_downward_speed = min_downward_speed
+    self.downward_speed_scale = downward_speed_scale
+    self._body_ids: list[int] | None = None
+
+  def __call__(self, env: ManagerBasedRlEnv) -> torch.Tensor:
+    region = cast(
+      DodgeRegionCommand, env.command_manager.get_term(self.command_name)
+    )
+    asset = cast(Entity, env.scene[self.asset_name])
+    if self._body_ids is None:
+      self._body_ids, matched = asset.find_bodies(
+        self.body_names, preserve_order=True
+      )
+      if len(matched) != len(self.body_names):
+        missing = sorted(set(self.body_names) - set(matched))
+        raise ValueError(f"Dodge risk bodies not found: {missing}")
+    assert self._body_ids is not None
+
+    pos = asset.data.body_link_pos_w[:, self._body_ids]
+    vel = asset.data.body_link_lin_vel_w[:, self._body_ids]
+    ground_z = env.scene.env_origins[:, 2]
+    height = (
+      pos[..., 2] - ground_z[:, None] - self.prediction_height
+    ).clamp_min(0.0)
+    vz = vel[..., 2]
+    flight_time = (
+      vz + torch.sqrt(vz.square() + 2.0 * self.gravity_magnitude * height)
+    ) / self.gravity_magnitude
+    flight_time = flight_time.clamp(*self.flight_time_range)
+    predicted_xy = pos[..., :2] + vel[..., :2] * flight_time[..., None]
+
+    distance = torch.linalg.vector_norm(
+      predicted_xy - region.center_w[:, None, :2], dim=-1
+    )
+    clearance = distance - region.radius[:, None] - self.body_margin
+    spatial_risk = torch.sigmoid(-clearance / self.temperature)
+    downward_gate = (
+      (-vz - self.min_downward_speed) / self.downward_speed_scale
+    ).clamp(0.0, 1.0)
+    region_finite = torch.isfinite(region.center_w).all(dim=-1) & torch.isfinite(
+      region.radius
+    )
+    finite = (
+      torch.isfinite(pos).all(dim=-1)
+      & torch.isfinite(vel).all(dim=-1)
+      & region_finite[:, None]
+    )
+    body_risk = torch.where(finite, spatial_risk * downward_gate, 0.0)
+    risk = body_risk.max(dim=-1).values
+    return risk * region.active.float()

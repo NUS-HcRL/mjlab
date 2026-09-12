@@ -16,10 +16,11 @@ from mjlab.tasks.fall.config.pm1.dodge_env_cfg import (
 from mjlab.tasks.fall.config.pm1.env_cfgs import pm1_flat_falling_env_cfg
 from mjlab.tasks.fall.config.pm1.rl_cfg import pm1_falling_amp_runner_cfg
 from mjlab.tasks.fall.mdp.dodge import (
+  DodgeFirstContactCost,
+  DodgePredictedLandingRisk,
   DodgeRegionCommand,
   DodgeRegionCommandCfg,
   dodge_region_contact_cost,
-  dodge_region_proximity_risk,
   region_contact_mask,
 )
 from mjlab.tasks.registry import load_env_cfg, load_rl_cfg
@@ -43,7 +44,15 @@ def make_region(num_envs: int = 4, **kwargs):
     body_link_pos_w=torch.zeros(num_envs, 1, 3),
     body_link_lin_vel_w=torch.zeros(num_envs, 1, 3),
   )
-  robot = SimpleNamespace(data=data, indexing=indexing)
+  class FakeRobot(SimpleNamespace):
+    body_names = ("test_body",)
+
+    def find_bodies(self, names, preserve_order=False):
+      del preserve_order
+      ids = [self.body_names.index(name) for name in names if name in self.body_names]
+      return ids, [self.body_names[i] for i in ids]
+
+  robot = FakeRobot(data=data, indexing=indexing)
 
   class Scene(dict):
     env_origins = torch.zeros(num_envs, 3)
@@ -127,7 +136,7 @@ def test_ballistic_projection_uses_observed_post_reset_velocity():
     region.compute(env.step_dt)
   expected_time = math.sqrt(2 * (0.82 - 0.35) / 9.81)
   torch.testing.assert_close(
-    region.center_w[0], torch.tensor([expected_time + 0.25, 0.0, 0.0]),
+    region.center_w[0], torch.tensor([expected_time + 0.35, 0.0, 0.0]),
     atol=1e-6,
     rtol=1e-6,
   )
@@ -186,7 +195,7 @@ def test_sampler_rejects_late_falls_and_initial_body_overlap():
   for _ in range(3):
     region.compute(env.step_dt)
   assert region.active.tolist() == [False, False, True]
-  torch.testing.assert_close(region.center_w[2], torch.tensor([0.75, 0, 0]))
+  torch.testing.assert_close(region.center_w[2], torch.tensor([0.85, 0, 0]))
 
 
 def test_sampling_respects_translated_environments_and_new_reset_velocity():
@@ -208,7 +217,7 @@ def test_sampling_respects_translated_environments_and_new_reset_velocity():
   for _ in range(3):
     region.compute(env.step_dt)
   assert region.active.item()
-  torch.testing.assert_close(region.center_w[0], torch.tensor([10, 19.25, 2]))
+  torch.testing.assert_close(region.center_w[0], torch.tensor([10, 19.15, 2]))
 
 
 def test_contact_cost_is_bounded_and_logs_before_partial_reset():
@@ -242,6 +251,25 @@ def test_contact_cost_is_bounded_and_logs_before_partial_reset():
   assert region.reset(torch.tensor([0, 1])) == {}  # No synthetic empty episodes.
 
 
+def test_first_contact_cost_is_fixed_once_per_episode():
+  env, region = make_region(2, probability=0)
+  region.active[:] = True
+  region.radius[:] = 0.1
+  env.scene["dodge_ground_contact"] = SimpleNamespace(
+    cfg=SimpleNamespace(num_slots=1),
+    data=SimpleNamespace(
+      found=torch.ones(2, 1),
+      pos=torch.tensor([[[0.0, 0.0, 0.0]], [[0.5, 0.0, 0.0]]]),
+    ),
+  )
+  cost = DodgeFirstContactCost()
+  # RewardManager later multiplies this by step_dt, yielding one fixed unit.
+  torch.testing.assert_close(cost(env), torch.tensor([50.0, 0.0]))
+  torch.testing.assert_close(cost(env), torch.zeros(2))
+  cost.reset(torch.tensor([0]))
+  torch.testing.assert_close(cost(env), torch.tensor([50.0, 0.0]))
+
+
 def test_probability_preserves_a_majority_of_unmodified_episodes():
   torch.manual_seed(123)
   _, region = make_region(4000)
@@ -251,16 +279,24 @@ def test_probability_preserves_a_majority_of_unmodified_episodes():
   assert torch.count_nonzero(region.command[~region.active]) == 0
 
 
-def test_proximity_risk_is_local_bounded_and_requires_active_region():
+def test_predicted_landing_risk_is_local_bounded_and_uses_selected_bodies():
   env, region = make_region(3, probability=0)
   region.active[:2] = True
   region.radius[:] = 0.1
+  robot = env.scene["robot"]
+  robot.body_names = ("torso", "knee", "head")
   data = env.scene["robot"].data
-  data.body_link_pos_w[:, 0] = torch.tensor(
-    [[0.0, 0.0, 0.1], [0.5, 0.0, 0.1], [0.0, 0.0, 0.1]]
+  data.body_link_pos_w = torch.tensor(
+    [
+      [[-0.30, 0.0, 0.30], [0.8, 0.0, 0.3], [0.0, 0.0, 0.1]],
+      [[-0.60, 0.0, 0.30], [0.8, 0.0, 0.3], [0.0, 0.0, 0.1]],
+      [[-0.30, 0.0, 0.30], [0.8, 0.0, 0.3], [0.0, 0.0, 0.1]],
+    ]
   )
-  data.body_link_lin_vel_w[:, 0, 2] = -0.55
-  risk = dodge_region_proximity_risk(env)
+  data.body_link_lin_vel_w = torch.zeros(3, 3, 3)
+  data.body_link_lin_vel_w[:, :, 2] = -1.0
+  data.body_link_lin_vel_w[:, 0, 0] = 1.0
+  risk = DodgePredictedLandingRisk(body_names=("torso", "knee"))(env)
   assert torch.all((0 <= risk) & (risk <= 1))
   assert risk[0] > risk[1] > risk[2]
   assert risk[2] == 0
@@ -301,11 +337,25 @@ def test_dodge_only_adds_expected_extensions_to_fall(play):
     assert term.history_length == 3 and term.noise is None
   dodge.commands = None
   cost = dodge.rewards.pop("dodge_region_contact")
-  assert cost.weight == -2.0
-  proximity = dodge.rewards.pop("dodge_region_proximity")
-  assert proximity.weight == -0.5
-  assert proximity.params["activation_height"] == 0.50
-  assert proximity.params["distance_scale"] == 0.18
+  assert cost.weight == -1.0
+  first_contact = dodge.rewards.pop("dodge_region_first_contact")
+  assert first_contact.weight == -0.75
+  assert isinstance(first_contact.func, DodgeFirstContactCost)
+  landing_risk = dodge.rewards.pop("dodge_predicted_landing_risk")
+  assert landing_risk.weight == -0.5
+  assert isinstance(landing_risk.func, DodgePredictedLandingRisk)
+  assert landing_risk.func.body_names == (
+    "LINK_TORSO_YAW",
+    "LINK_ELBOW_PITCH_L",
+    "LINK_ELBOW_END_L",
+    "LINK_ELBOW_PITCH_R",
+    "LINK_ELBOW_END_R",
+    "LINK_KNEE_PITCH_L",
+    "LINK_KNEE_PITCH_R",
+  )
+  assert landing_risk.func.flight_time_range == (0.05, 0.45)
+  assert landing_risk.func.body_margin == 0.04
+  assert landing_risk.func.temperature == 0.04
   sensor = dodge.scene.sensors[-1]
   assert sensor.primary.exclude == ()
   assert sensor.num_slots == 4

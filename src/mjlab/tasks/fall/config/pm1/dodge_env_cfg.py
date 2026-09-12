@@ -5,10 +5,11 @@ from mjlab.managers.manager_term_config import ObservationTermCfg, RewardTermCfg
 from mjlab.rl import RslRlOnPolicyRunnerCfg
 from mjlab.sensor import ContactMatch, ContactSensorCfg
 from mjlab.tasks.fall.mdp.dodge import (
+  DodgeFirstContactCost,
+  DodgePredictedLandingRisk,
   DodgeRegionCommandCfg,
   dodge_region_contact_cost,
   dodge_region_observation,
-  dodge_region_proximity_risk,
 )
 
 from .env_cfgs import pm1_flat_falling_env_cfg
@@ -57,18 +58,30 @@ def pm1_flat_falling_dodge_env_cfg(
   )
   cfg.rewards["dodge_region_contact"] = RewardTermCfg(
     func=dodge_region_contact_cost,
-    weight=-2.0,
+    weight=-1.0,
     params={"command_name": "dodge", "sensor_name": "dodge_ground_contact"},
   )
-  cfg.rewards["dodge_region_proximity"] = RewardTermCfg(
-    func=dodge_region_proximity_risk,
+  cfg.rewards["dodge_region_first_contact"] = RewardTermCfg(
+    func=DodgeFirstContactCost(),
+    weight=-0.75,
+  )
+  cfg.rewards["dodge_predicted_landing_risk"] = RewardTermCfg(
+    func=DodgePredictedLandingRisk(
+      body_names=(
+        "LINK_TORSO_YAW",
+        "LINK_ELBOW_PITCH_L",
+        "LINK_ELBOW_END_L",
+        "LINK_ELBOW_PITCH_R",
+        "LINK_ELBOW_END_R",
+        "LINK_KNEE_PITCH_L",
+        "LINK_KNEE_PITCH_R",
+      ),
+      prediction_height=0.10,
+      flight_time_range=(0.05, 0.45),
+      body_margin=0.04,
+      temperature=0.04,
+    ),
     weight=-0.5,
-    params={
-      "command_name": "dodge",
-      "asset_name": "robot",
-      "activation_height": 0.50,
-      "distance_scale": 0.18,
-    },
   )
   return cfg
 
