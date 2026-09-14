@@ -120,6 +120,53 @@ def test_class_based_event_with_domain_randomization(device):
   assert len(manager.domain_randomization_fields) == 2
 
 
+def test_reset_event_return_values_are_exposed_as_metrics(device):
+  env = Mock()
+  env.num_envs = 2
+  env.device = device
+  env.scene = {}
+  env.sim = Mock()
+
+  def reset_with_metric(env, env_ids):
+    del env, env_ids
+    return {"Metrics/test/reset_value": torch.tensor(3.0, device=device)}
+
+  manager = EventManager(
+    {"metric_event": EventTermCfg(mode="reset", func=reset_with_metric)}, env
+  )
+  env_ids = torch.tensor([0, 1], device=device)
+  manager.apply(mode="reset", env_ids=env_ids, global_env_step_count=1)
+
+  metrics = manager.reset(env_ids)
+
+  assert metrics["Metrics/test/reset_value"].item() == 3.0
+  assert manager.reset(env_ids) == {}
+
+
+def test_reset_resamples_plain_function_interval_timers(device):
+  env = Mock()
+  env.num_envs = 3
+  env.device = device
+  env.scene = {}
+  env.sim = Mock()
+
+  manager = EventManager(
+    {
+      "plain_interval": EventTermCfg(
+        mode="interval",
+        func=lambda env, env_ids: None,
+        interval_range_s=(2.0, 2.0),
+      )
+    },
+    env,
+  )
+  manager._interval_term_time_left[0].zero_()
+
+  manager.reset(torch.tensor([1], device=device))
+
+  assert manager._interval_term_time_left[0].tolist() == [0.0, 2.0, 0.0]
+
+
 def test_randomize_pd_gains(device):
   """Test PD gain randomization."""
   env = Mock()

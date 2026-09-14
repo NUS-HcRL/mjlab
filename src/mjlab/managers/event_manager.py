@@ -23,6 +23,7 @@ class EventManager(ManagerBase):
     self._mode_term_cfgs: dict[EventMode, list[EventTermCfg]] = dict()
     self._mode_class_term_cfgs: dict[EventMode, list[EventTermCfg]] = dict()
     self._domain_randomization_fields: list[str] = list()
+    self._reset_term_metrics: dict[str, torch.Tensor] = {}
 
     super().__init__(env=env)
 
@@ -86,18 +87,26 @@ class EventManager(ManagerBase):
         term_cfg.func.reset(env_ids=env_ids)
     if env_ids is None:
       num_envs = self._env.num_envs
+      resolved_env_ids: torch.Tensor | slice = slice(None)
     else:
       num_envs = len(env_ids)
+      resolved_env_ids = env_ids
     if "interval" in self._mode_term_cfgs:
-      for index, term_cfg in enumerate(self._mode_class_term_cfgs["interval"]):
+      # Every per-environment interval timer belongs to an episode, regardless
+      # of whether its event is a class or a plain function. Otherwise function
+      # events can inherit a nearly-expired timer and fire immediately after a
+      # reset (for example, an extra velocity push on a fresh fall state).
+      for index, term_cfg in enumerate(self._mode_term_cfgs["interval"]):
         if not term_cfg.is_global_time:
           assert term_cfg.interval_range_s is not None
           lower, upper = term_cfg.interval_range_s
           sampled_interval = (
             torch.rand(num_envs, device=self.device) * (upper - lower) + lower
           )
-          self._interval_term_time_left[index][env_ids] = sampled_interval
-    return {}
+          self._interval_term_time_left[index][resolved_env_ids] = sampled_interval
+    metrics = self._reset_term_metrics
+    self._reset_term_metrics = {}
+    return metrics
 
   def apply(
     self,
@@ -153,7 +162,9 @@ class EventManager(ManagerBase):
             global_env_step_count
           )
           self._reset_term_last_triggered_once[index][env_ids] = True
-          term_cfg.func(self._env, env_ids, **term_cfg.params)
+          result = term_cfg.func(self._env, env_ids, **term_cfg.params)
+          if isinstance(result, dict):
+            self._reset_term_metrics.update(result)
         else:
           last_triggered_step = self._reset_term_last_triggered_step_id[index][env_ids]
           triggered_at_least_once = self._reset_term_last_triggered_once[index][env_ids]
@@ -169,7 +180,9 @@ class EventManager(ManagerBase):
             self._reset_term_last_triggered_step_id[index][valid_env_ids] = (
               global_env_step_count
             )
-            term_cfg.func(self._env, valid_env_ids, **term_cfg.params)
+            result = term_cfg.func(self._env, valid_env_ids, **term_cfg.params)
+            if isinstance(result, dict):
+              self._reset_term_metrics.update(result)
       else:
         term_cfg.func(self._env, env_ids, **term_cfg.params)
 

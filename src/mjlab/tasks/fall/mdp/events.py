@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 from typing import TYPE_CHECKING, Sequence
 
+import numpy as np
 import torch
 
 from mjlab.entity import Entity
@@ -27,10 +28,13 @@ _MOTION_RESET_POOL_CACHE: dict[
   tuple[tuple[str, ...], int, str, int, float | None, float | None],
   dict[str, torch.Tensor],
 ] = {}
+_STABLE_STATE_CACHE: dict[tuple, dict[str, torch.Tensor]] = {}
+_STABLE_STATE_POOL_CACHE: dict[tuple, dict[str, torch.Tensor]] = {}
 _LAST_RESET_DATA_MASK_ATTR = "_fall_last_reset_data_mask"
 _LAST_RESET_DATA_DIRECTION_ATTR = "_fall_last_reset_data_direction_w"
 _FORCE_PULSE_STEPS_LEFT_ATTR = "_fall_force_pulse_steps_left"
 _FORCE_PULSE_COOLDOWN_STEPS_LEFT_ATTR = "_fall_force_pulse_cooldown_steps_left"
+_FORCE_PULSE_PENDING_ATTR = "_fall_force_pulse_pending"
 _DATA_RESET_OBS_PENDING_ATTR = "_fall_data_reset_obs_pending"
 _DATA_RESET_POOL_ROW_ATTR = "_fall_data_reset_pool_row"
 _DATA_RESET_MOTION_POOL_ATTR = "_fall_data_reset_motion_pool"
@@ -55,6 +59,8 @@ def _get_adaptive_sampler(
   replay_probability: float,
   min_failures: int,
   neighbor_scale: float,
+  uniform_ratio: float,
+  priority_alpha: float,
 ) -> FallAdaptiveResetSampler:
   sampler = getattr(env, _ADAPTIVE_SAMPLER_ATTR, None)
   if not isinstance(sampler, FallAdaptiveResetSampler):
@@ -64,12 +70,16 @@ def _get_adaptive_sampler(
       replay_probability=replay_probability,
       min_failures=min_failures,
       neighbor_scale=neighbor_scale,
+      uniform_ratio=uniform_ratio,
+      priority_alpha=priority_alpha,
     )
     setattr(env, _ADAPTIVE_SAMPLER_ATTR, sampler)
   else:
-    sampler.replay_probability = float(replay_probability)
+    sampler.replay_probability = min(max(float(replay_probability), 0.0), 1.0)
     sampler.min_failures = max(int(min_failures), 1)
     sampler.neighbor_scale = max(float(neighbor_scale), 0.0)
+    sampler.uniform_ratio = min(max(float(uniform_ratio), 0.0), 1.0)
+    sampler.priority_alpha = min(max(float(priority_alpha), 0.0), 1.0)
   return sampler
 
 
@@ -127,9 +137,7 @@ def _pre_switch_joint_cols(prefix: str, num_joints: int, kind: str) -> list[str]
 
 
 def _pre_switch_base_quat_cols(prefix: str) -> list[str]:
-  return [
-    f"pre_{prefix}_base_quat_{axis}" for axis in ("w", "x", "y", "z")
-  ]
+  return [f"pre_{prefix}_base_quat_{axis}" for axis in ("w", "x", "y", "z")]
 
 
 def _pre_switch_base_pos_cols(prefix: str) -> list[str]:
@@ -141,9 +149,7 @@ def _pre_switch_base_lin_vel_cols(prefix: str) -> list[str]:
 
 
 def _pre_switch_base_ang_vel_cols(prefix: str) -> list[str]:
-  return [
-    f"pre_{prefix}_base_ang_vel_w_{axis}" for axis in ("x", "y", "z")
-  ]
+  return [f"pre_{prefix}_base_ang_vel_w_{axis}" for axis in ("x", "y", "z")]
 
 
 def _load_pre_switch_history_tensors(
@@ -181,20 +187,14 @@ def _load_pre_switch_history_tensors(
     missing = [
       col
       for col in (
-        joint_pos_cols
-        + joint_vel_cols
-        + pos_cols
-        + quat_cols
-        + lin_cols
-        + ang_cols
+        joint_pos_cols + joint_vel_cols + pos_cols + quat_cols + lin_cols + ang_cols
       )
       if col not in fieldnames
     ]
     if missing:
       raise ValueError(
         "Reset motion CSV has pre-switch history marker but is missing columns: "
-        f"{', '.join(missing[:8])}"
-        + ("..." if len(missing) > 8 else "")
+        f"{', '.join(missing[:8])}" + ("..." if len(missing) > 8 else "")
       )
     joint_pos[:, frame_idx] = torch.tensor(
       [[float(row[col]) for col in joint_pos_cols] for row in rows],
@@ -268,8 +268,12 @@ def _load_motion_reset_csv(
     raise ValueError(f"Reset motion '{path}' is empty.")
 
   csv_root_body_idx = _csv_body_idx(root_body_idx)
-  joint_pos_cols = [f"joint_pos_{joint_idx}" for joint_idx in range(expected_num_joints)]
-  joint_vel_cols = [f"joint_vel_{joint_idx}" for joint_idx in range(expected_num_joints)]
+  joint_pos_cols = [
+    f"joint_pos_{joint_idx}" for joint_idx in range(expected_num_joints)
+  ]
+  joint_vel_cols = [
+    f"joint_vel_{joint_idx}" for joint_idx in range(expected_num_joints)
+  ]
   root_pos_cols = [f"body_pos_w_{csv_root_body_idx}_{axis}" for axis in ("x", "y", "z")]
   root_quat_cols = [
     f"body_quat_w_{csv_root_body_idx}_{axis}" for axis in ("w", "x", "y", "z")
@@ -381,9 +385,8 @@ def _load_motion_reset_csv(
   ):
     valid_rows &= dataset["root_state"][:, 2] >= float(min_root_height)
   if max_abs_joint_velocity is not None:
-    valid_rows &= (
-      dataset["joint_vel"].abs().amax(dim=-1)
-      <= float(max_abs_joint_velocity)
+    valid_rows &= dataset["joint_vel"].abs().amax(dim=-1) <= float(
+      max_abs_joint_velocity
     )
 
   num_filtered = int((~valid_rows).sum().item())
@@ -512,20 +515,246 @@ def _default_states(
   return root_state, joint_pos, joint_vel
 
 
-def _sample_tilt_states(
+def _load_stable_state_file(
+  path: str,
+  expected_num_joints: int,
+  device: str,
+  min_root_height: float | None = None,
+  max_root_linear_speed: float | None = None,
+  max_root_angular_speed: float | None = None,
+  max_abs_joint_velocity: float | None = None,
+  joint_pos_limits: torch.Tensor | None = None,
+) -> dict[str, torch.Tensor]:
+  """Load complete trajectory states used by the normal reset distribution.
+
+  The preferred layout is ``time + root_state(13) + joint_pos + joint_vel``.
+  Legacy MuJoCo qpos-only files, with or without time, remain supported and
+  receive zero root/joint velocity.
+  """
+  limits_key: tuple[float, ...] | None = None
+  if joint_pos_limits is not None:
+    limits_key = tuple(
+      float(value) for value in joint_pos_limits.detach().cpu().reshape(-1).tolist()
+    )
+  cache_key = (
+    path,
+    expected_num_joints,
+    device,
+    min_root_height,
+    max_root_linear_speed,
+    max_root_angular_speed,
+    max_abs_joint_velocity,
+    limits_key,
+  )
+  cached = _STABLE_STATE_CACHE.get(cache_key)
+  if cached is not None:
+    return cached
+
+  try:
+    array = np.load(path, allow_pickle=False)
+  except Exception as exc:
+    raise ValueError(
+      f"Could not load stable reset states from '{path}': {exc}"
+    ) from exc
+  if array.ndim != 2:
+    raise ValueError(
+      f"Stable reset file '{path}' must be a 2-D array, got shape {array.shape}."
+    )
+
+  qpos_dim = 7 + expected_num_joints
+  complete_state_dim = 13 + 2 * expected_num_joints
+  num_columns = array.shape[1]
+  if num_columns in (complete_state_dim, complete_state_dim + 1):
+    state_array = array[:, 1:] if num_columns == complete_state_dim + 1 else array
+    root_state_array = state_array[:, :13]
+    joint_pos_array = state_array[:, 13 : 13 + expected_num_joints]
+    joint_vel_array = state_array[:, 13 + expected_num_joints :]
+  elif num_columns in (qpos_dim, qpos_dim + 1):
+    qpos_array = array[:, 1:] if num_columns == qpos_dim + 1 else array
+    root_state_array = np.zeros((len(array), 13), dtype=array.dtype)
+    root_state_array[:, :7] = qpos_array[:, :7]
+    joint_pos_array = qpos_array[:, 7:]
+    joint_vel_array = np.zeros_like(joint_pos_array)
+  else:
+    raise ValueError(
+      f"Stable reset file '{path}' has {num_columns} columns; expected "
+      f"{qpos_dim}/{qpos_dim + 1} legacy qpos columns or "
+      f"{complete_state_dim}/{complete_state_dim + 1} complete-state columns."
+    )
+
+  root_state = torch.as_tensor(
+    np.asarray(root_state_array, dtype=np.float32),
+    device=device,
+    dtype=torch.float32,
+  )
+  joint_pos = torch.as_tensor(
+    np.asarray(joint_pos_array, dtype=np.float32),
+    device=device,
+    dtype=torch.float32,
+  )
+  joint_vel = torch.as_tensor(
+    np.asarray(joint_vel_array, dtype=np.float32),
+    device=device,
+    dtype=torch.float32,
+  )
+  quat_norm = torch.linalg.vector_norm(root_state[:, 3:7], dim=-1)
+  valid_rows = torch.isfinite(root_state).all(dim=-1)
+  valid_rows &= torch.isfinite(joint_pos).all(dim=-1)
+  valid_rows &= torch.isfinite(joint_vel).all(dim=-1)
+  valid_rows &= quat_norm > 1e-6
+  if min_root_height is not None:
+    valid_rows &= root_state[:, 2] >= float(min_root_height)
+  if max_root_linear_speed is not None:
+    valid_rows &= torch.linalg.vector_norm(root_state[:, 7:10], dim=-1) <= float(
+      max_root_linear_speed
+    )
+  if max_root_angular_speed is not None:
+    valid_rows &= torch.linalg.vector_norm(root_state[:, 10:13], dim=-1) <= float(
+      max_root_angular_speed
+    )
+  if max_abs_joint_velocity is not None:
+    valid_rows &= joint_vel.abs().amax(dim=-1) <= float(max_abs_joint_velocity)
+  if joint_pos_limits is not None:
+    limits = joint_pos_limits.to(device=device, dtype=torch.float32)
+    if limits.shape != (expected_num_joints, 2):
+      raise ValueError(
+        f"Expected joint limits with shape ({expected_num_joints}, 2), got "
+        f"{tuple(limits.shape)}."
+      )
+    valid_rows &= (joint_pos >= limits[:, 0]).all(dim=-1)
+    valid_rows &= (joint_pos <= limits[:, 1]).all(dim=-1)
+  if not valid_rows.any().item():
+    raise ValueError(
+      f"Stable reset file '{path}' has no rows remaining after safety filtering."
+    )
+  filtered_count = int((~valid_rows).sum().item())
+  if filtered_count:
+    print(
+      f"[INFO] Filtered {filtered_count}/{len(root_state)} invalid stable reset rows "
+      f"from '{path}'."
+    )
+    root_state = root_state[valid_rows]
+    joint_pos = joint_pos[valid_rows]
+    joint_vel = joint_vel[valid_rows]
+  root_state[:, 3:7] = _normalize_quat(root_state[:, 3:7])
+  state = {
+    "root_state": root_state,
+    "joint_pos": joint_pos,
+    "joint_vel": joint_vel,
+  }
+  _STABLE_STATE_CACHE[cache_key] = state
+  return state
+
+
+def _apply_world_pose_offset(
+  root_state: torch.Tensor, pose_offset: torch.Tensor
+) -> None:
+  """Apply a world-frame pose offset and rotate world-frame velocities with it."""
+  root_state[:, 0:3] += pose_offset[:, 0:3]
+  rotation = quat_from_euler_xyz(
+    pose_offset[:, 3], pose_offset[:, 4], pose_offset[:, 5]
+  )
+  root_state[:, 3:7] = _normalize_quat(quat_mul(rotation, root_state[:, 3:7]))
+  root_state[:, 7:10] = quat_apply(rotation, root_state[:, 7:10])
+  root_state[:, 10:13] = quat_apply(rotation, root_state[:, 10:13])
+
+
+def _sample_centered_range_jitter(
+  ranges: torch.Tensor,
+  size: tuple[int, ...],
+  device: str,
+) -> torch.Tensor:
+  """Sample zero-centered jitter using half of each configured range width."""
+  half_width = 0.5 * (ranges[:, 1] - ranges[:, 0]).abs()
+  return sample_uniform(-half_width, half_width, size=size, device=device)
+
+
+def _sample_stable_states(
   env: ManagerBasedRlEnv,
   asset: Entity,
   env_ids: torch.Tensor,
-  tilt_pose_range: dict[str, tuple[float, float]],
-  tilt_velocity_range: dict[str, tuple[float, float]] | None,
-  tilt_joint_position_range: tuple[float, float],
-  tilt_joint_velocity_range: tuple[float, float],
+  stable_state_files: Sequence[str],
+  stable_pose_range: dict[str, tuple[float, float]] | None,
+  stable_joint_position_std: float,
+  stable_min_root_height: float | None,
+  stable_max_root_linear_speed: float | None = None,
+  stable_max_root_angular_speed: float | None = None,
+  stable_max_abs_joint_velocity: float | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
   root_state, joint_pos, joint_vel = _default_states(env, asset, env_ids)
 
+  if stable_state_files:
+    pool_key = (
+      tuple(stable_state_files),
+      asset.num_joints,
+      env.device,
+      stable_min_root_height,
+      stable_max_root_linear_speed,
+      stable_max_root_angular_speed,
+      stable_max_abs_joint_velocity,
+    )
+    stable_pool = _STABLE_STATE_POOL_CACHE.get(pool_key)
+    if stable_pool is None:
+      default_joint_pos_limits = asset.data.default_joint_pos_limits
+      assert default_joint_pos_limits is not None
+      joint_pos_limits = default_joint_pos_limits[0]
+      pools = [
+        _load_stable_state_file(
+          path=path,
+          expected_num_joints=asset.num_joints,
+          device=env.device,
+          min_root_height=stable_min_root_height,
+          max_root_linear_speed=stable_max_root_linear_speed,
+          max_root_angular_speed=stable_max_root_angular_speed,
+          max_abs_joint_velocity=stable_max_abs_joint_velocity,
+          joint_pos_limits=joint_pos_limits,
+        )
+        for path in stable_state_files
+      ]
+      lengths = torch.tensor(
+        [len(pool["root_state"]) for pool in pools],
+        dtype=torch.long,
+        device=env.device,
+      )
+      offsets = torch.cumsum(lengths, dim=0) - lengths
+      stable_pool = {
+        "root_state": torch.cat([pool["root_state"] for pool in pools], dim=0),
+        "joint_pos": torch.cat([pool["joint_pos"] for pool in pools], dim=0),
+        "joint_vel": torch.cat([pool["joint_vel"] for pool in pools], dim=0),
+        "lengths": lengths,
+        "offsets": offsets,
+      }
+      _STABLE_STATE_POOL_CACHE[pool_key] = stable_pool
+
+    # Balance behaviors by file instead of allowing longer recordings to
+    # dominate the reset distribution.  Dynamic per-file row bounds are
+    # handled with one vectorized index, without reset-time GPU synchronization.
+    file_ids = torch.randint(
+      0,
+      len(stable_state_files),
+      (len(env_ids),),
+      device=env.device,
+    )
+    file_lengths = stable_pool["lengths"][file_ids]
+    row_ids = torch.floor(
+      torch.rand(len(env_ids), device=env.device) * file_lengths
+    ).long()
+    pool_ids = stable_pool["offsets"][file_ids] + row_ids
+    sampled_root_state = stable_pool["root_state"][pool_ids]
+
+    # Discard accumulated trajectory XY translation and place each sample at
+    # its vectorized environment origin.  Restore all recorded velocities.
+    root_state[:, 0:2] = env.scene.env_origins[env_ids, 0:2]
+    root_state[:, 2] = env.scene.env_origins[env_ids, 2] + sampled_root_state[:, 2]
+    root_state[:, 3:13] = sampled_root_state[:, 3:13]
+    joint_pos = stable_pool["joint_pos"][pool_ids].clone()
+    joint_vel = stable_pool["joint_vel"][pool_ids].clone()
+
+  if stable_pose_range is None:
+    stable_pose_range = {}
   pose_ranges = torch.tensor(
     [
-      tilt_pose_range.get(key, (0.0, 0.0))
+      stable_pose_range.get(key, (0.0, 0.0))
       for key in ("x", "y", "z", "roll", "pitch", "yaw")
     ],
     device=env.device,
@@ -534,45 +763,19 @@ def _sample_tilt_states(
   pose_samples = sample_uniform(
     pose_ranges[:, 0], pose_ranges[:, 1], (len(env_ids), 6), device=env.device
   )
-  root_state[:, 0:3] += pose_samples[:, 0:3]
-  root_state[:, 3:7] = quat_mul(
-    root_state[:, 3:7],
-    quat_from_euler_xyz(
-      pose_samples[:, 3], pose_samples[:, 4], pose_samples[:, 5]
-    ),
-  )
+  _apply_world_pose_offset(root_state, pose_samples)
 
-  if tilt_velocity_range is None:
-    tilt_velocity_range = {}
-  vel_ranges = torch.tensor(
-    [
-      tilt_velocity_range.get(key, (0.0, 0.0))
-      for key in ("x", "y", "z", "roll", "pitch", "yaw")
-    ],
-    device=env.device,
-    dtype=torch.float32,
-  )
-  vel_samples = sample_uniform(
-    vel_ranges[:, 0], vel_ranges[:, 1], (len(env_ids), 6), device=env.device
-  )
-  root_state[:, 7:13] += vel_samples
+  # Optional legacy qpos noise. PM1 complete-state resets disable this because
+  # changing joint positions without changing velocity breaks trajectory state
+  # consistency.
+  if stable_joint_position_std > 0.0:
+    joint_pos += torch.randn_like(joint_pos).clamp_(-2.0, 2.0) * float(
+      stable_joint_position_std
+    )
 
-  joint_pos += sample_uniform(
-    tilt_joint_position_range[0],
-    tilt_joint_position_range[1],
-    joint_pos.shape,
-    device=env.device,
-  )
-  joint_vel += sample_uniform(
-    tilt_joint_velocity_range[0],
-    tilt_joint_velocity_range[1],
-    joint_vel.shape,
-    device=env.device,
-  )
-
-  soft_joint_pos_limits = asset.data.soft_joint_pos_limits
-  assert soft_joint_pos_limits is not None
-  joint_limits = soft_joint_pos_limits[env_ids]
+  joint_pos_limits = asset.data.joint_pos_limits
+  assert joint_pos_limits is not None
+  joint_limits = joint_pos_limits[env_ids]
   joint_pos = joint_pos.clamp_(joint_limits[..., 0], joint_limits[..., 1])
 
   return root_state, joint_pos, joint_vel
@@ -585,10 +788,8 @@ def _sample_near_random_failure_states(
   prototype_root_state_rel: torch.Tensor,
   prototype_joint_pos: torch.Tensor,
   prototype_joint_vel: torch.Tensor,
-  tilt_pose_range: dict[str, tuple[float, float]],
-  tilt_velocity_range: dict[str, tuple[float, float]] | None,
-  tilt_joint_position_range: tuple[float, float],
-  tilt_joint_velocity_range: tuple[float, float],
+  stable_pose_range: dict[str, tuple[float, float]] | None,
+  stable_joint_position_std: float,
   neighbor_scale: float,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
   """Sample a local neighborhood around a failed random-reset condition."""
@@ -597,9 +798,11 @@ def _sample_near_random_failure_states(
   joint_pos = prototype_joint_pos.clone()
   joint_vel = prototype_joint_vel.clone()
 
+  if stable_pose_range is None:
+    stable_pose_range = {}
   pose_ranges = torch.tensor(
     [
-      tilt_pose_range.get(key, (0.0, 0.0))
+      stable_pose_range.get(key, (0.0, 0.0))
       for key in ("x", "y", "z", "roll", "pitch", "yaw")
     ],
     device=env.device,
@@ -608,45 +811,14 @@ def _sample_near_random_failure_states(
   pose_jitter = sample_uniform(
     pose_ranges[:, 0], pose_ranges[:, 1], (len(env_ids), 6), device=env.device
   ) * float(neighbor_scale)
-  root_state[:, 0:3] += pose_jitter[:, 0:3]
-  root_state[:, 3:7] = quat_mul(
-    root_state[:, 3:7],
-    quat_from_euler_xyz(
-      pose_jitter[:, 3], pose_jitter[:, 4], pose_jitter[:, 5]
-    ),
-  )
-  root_state[:, 3:7] = _normalize_quat(root_state[:, 3:7])
+  _apply_world_pose_offset(root_state, pose_jitter)
 
-  if tilt_velocity_range is None:
-    tilt_velocity_range = {}
-  velocity_ranges = torch.tensor(
-    [
-      tilt_velocity_range.get(key, (0.0, 0.0))
-      for key in ("x", "y", "z", "roll", "pitch", "yaw")
-    ],
-    device=env.device,
-    dtype=torch.float32,
-  )
-  velocity_jitter = sample_uniform(
-    velocity_ranges[:, 0],
-    velocity_ranges[:, 1],
-    (len(env_ids), 6),
-    device=env.device,
-  ) * float(neighbor_scale)
-  root_state[:, 7:13] += velocity_jitter
-
-  joint_pos += sample_uniform(
-    tilt_joint_position_range[0],
-    tilt_joint_position_range[1],
-    joint_pos.shape,
-    device=env.device,
-  ) * float(neighbor_scale)
-  joint_vel += sample_uniform(
-    tilt_joint_velocity_range[0],
-    tilt_joint_velocity_range[1],
-    joint_vel.shape,
-    device=env.device,
-  ) * float(neighbor_scale)
+  if stable_joint_position_std > 0.0:
+    joint_pos += (
+      torch.randn_like(joint_pos).clamp_(-2.0, 2.0)
+      * float(stable_joint_position_std)
+      * float(neighbor_scale)
+    )
 
   soft_joint_pos_limits = asset.data.soft_joint_pos_limits
   assert soft_joint_pos_limits is not None
@@ -694,8 +866,7 @@ def _sample_motion_states(
   root_ids, _ = asset.find_bodies((data_root_body_name,), preserve_order=True)
   if not root_ids:
     raise ValueError(
-      f"Could not find data root body '{data_root_body_name}' in asset "
-      f"'{asset_name}'."
+      f"Could not find data root body '{data_root_body_name}' in asset '{asset_name}'."
     )
   root_body_idx = root_ids[0]
 
@@ -733,9 +904,7 @@ def _sample_motion_states(
   if perturbation_scale is None:
     perturbation_scale = torch.ones(len(env_ids), device=env.device)
   else:
-    perturbation_scale = perturbation_scale.to(
-      device=env.device, dtype=torch.float32
-    )
+    perturbation_scale = perturbation_scale.to(device=env.device, dtype=torch.float32)
   if _root_state_is_placeholder(root_state_pool):
     default_root_state = asset.data.default_root_state
     assert default_root_state is not None
@@ -763,15 +932,11 @@ def _sample_motion_states(
   )
   pose_samples *= perturbation_scale.unsqueeze(-1)
   root_height = root_state[:, 2] - env.scene.env_origins[env_ids, 2]
-  _zero_low_clearance_pose_tilt(
-    pose_samples, root_height, data_low_clearance_height
-  )
+  _zero_low_clearance_pose_tilt(pose_samples, root_height, data_low_clearance_height)
   root_state[:, 0:3] += pose_samples[:, 0:3]
   root_state[:, 3:7] = quat_mul(
     root_state[:, 3:7],
-    quat_from_euler_xyz(
-      pose_samples[:, 3], pose_samples[:, 4], pose_samples[:, 5]
-    ),
+    quat_from_euler_xyz(pose_samples[:, 3], pose_samples[:, 4], pose_samples[:, 5]),
   )
   root_state[:, 3:7] = _normalize_quat(root_state[:, 3:7])
 
@@ -875,12 +1040,7 @@ def try_build_data_reset_obs_history_frames(
   pending = getattr(env, _DATA_RESET_OBS_PENDING_ATTR, None)
   pool_row = getattr(env, _DATA_RESET_POOL_ROW_ATTR, None)
   motion_pool = getattr(env, _DATA_RESET_MOTION_POOL_ATTR, None)
-  if (
-    pending is None
-    or pool_row is None
-    or motion_pool is None
-    or not pending.any()
-  ):
+  if pending is None or pool_row is None or motion_pool is None or not pending.any():
     return None
 
   num_pre_frames = history_length - 1
@@ -913,17 +1073,15 @@ def try_build_data_reset_obs_history_frames(
     return env_ids, frames
 
   if term_name == "joint_pos":
-    pre = (
-      motion_pool["pre_joint_pos"][row_ids]
-      - default_joint_pos[env_ids].unsqueeze(1)
+    pre = motion_pool["pre_joint_pos"][row_ids] - default_joint_pos[env_ids].unsqueeze(
+      1
     )
     frames = torch.cat([pre, current_obs[env_ids].unsqueeze(1)], dim=1)
     return env_ids, frames
 
   if term_name == "joint_vel":
-    pre = (
-      motion_pool["pre_joint_vel"][row_ids]
-      - default_joint_vel[env_ids].unsqueeze(1)
+    pre = motion_pool["pre_joint_vel"][row_ids] - default_joint_vel[env_ids].unsqueeze(
+      1
     )
     frames = torch.cat([pre, current_obs[env_ids].unsqueeze(1)], dim=1)
     return env_ids, frames
@@ -989,10 +1147,13 @@ def _write_state_and_forward(
 def reset_root_state_mixed(
   env: ManagerBasedRlEnv,
   env_ids: torch.Tensor | None,
-  tilt_pose_range: dict[str, tuple[float, float]],
-  tilt_velocity_range: dict[str, tuple[float, float]] | None = None,
-  tilt_joint_position_range: tuple[float, float] = (0.0, 0.0),
-  tilt_joint_velocity_range: tuple[float, float] = (0.0, 0.0),
+  stable_state_files: Sequence[str] = (),
+  stable_pose_range: dict[str, tuple[float, float]] | None = None,
+  stable_joint_position_std: float = 0.05,
+  stable_min_root_height: float | None = None,
+  stable_max_root_linear_speed: float | None = None,
+  stable_max_root_angular_speed: float | None = None,
+  stable_max_abs_joint_velocity: float | None = None,
   data_probability: float = 0.0,
   motion_files: Sequence[str] = (),
   data_root_body_name: str = "LINK_BASE",
@@ -1006,21 +1167,21 @@ def reset_root_state_mixed(
   use_data_reset_obs_history: bool = False,
   adaptive_sampling: bool = False,
   adaptive_buffer_size: int = 4096,
-  adaptive_replay_probability: float = 0.5,
-  adaptive_min_failures: int = 1,
+  adaptive_replay_probability: float = 0.2,
+  adaptive_min_failures: int = 128,
   adaptive_neighbor_scale: float = 0.15,
-  adaptive_failure_term_names: Sequence[str] = (
-    "forbidden_body_contact_force",
-  ),
+  adaptive_uniform_ratio: float = 0.2,
+  adaptive_priority_alpha: float = 0.05,
+  adaptive_failure_term_names: Sequence[str] = ("forbidden_body_contact_force",),
   asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
-) -> None:
-  """Reset from data/random states, optionally replaying failed neighborhoods."""
+) -> dict[str, torch.Tensor]:
+  """Reset from complete stable/data states and replay failed neighborhoods."""
   if env_ids is None:
     env_ids = torch.arange(env.num_envs, device=env.device, dtype=torch.int)
   else:
     env_ids = env_ids.to(device=env.device, dtype=torch.long)
   if len(env_ids) == 0:
-    return
+    return {}
 
   asset: Entity = env.scene[asset_cfg.name]
   sampler: FallAdaptiveResetSampler | None = None
@@ -1031,24 +1192,34 @@ def reset_root_state_mixed(
       replay_probability=adaptive_replay_probability,
       min_failures=adaptive_min_failures,
       neighbor_scale=adaptive_neighbor_scale,
+      uniform_ratio=adaptive_uniform_ratio,
+      priority_alpha=adaptive_priority_alpha,
     )
-    sampler.capture_failures(
-      env_ids,
-      _adaptive_failure_mask(env, env_ids, adaptive_failure_term_names),
-    )
+    failure_mask = _adaptive_failure_mask(env, env_ids, adaptive_failure_term_names)
+    # Only a target failure or a timeout is a meaningful adaptive outcome.
+    # Invalid/non-target terminal states must not lower replay priority as if
+    # the policy had successfully handled the sampled condition.
+    outcome_mask = failure_mask | env.termination_manager.time_outs[env_ids]
+    sampler.capture_failures(env_ids, failure_mask, outcome_mask)
 
   reset_data_mask = torch.zeros(env.num_envs, dtype=torch.bool, device=env.device)
   setattr(env, _LAST_RESET_DATA_MASK_ATTR, reset_data_mask)
   reset_data_direction_w = getattr(env, _LAST_RESET_DATA_DIRECTION_ATTR, None)
-  if (
-    not isinstance(reset_data_direction_w, torch.Tensor)
-    or reset_data_direction_w.shape != (env.num_envs, 3)
-  ):
+  if not isinstance(
+    reset_data_direction_w, torch.Tensor
+  ) or reset_data_direction_w.shape != (env.num_envs, 3):
     reset_data_direction_w = torch.zeros(
       (env.num_envs, 3), dtype=torch.float32, device=env.device
     )
     setattr(env, _LAST_RESET_DATA_DIRECTION_ATTR, reset_data_direction_w)
   reset_data_direction_w[env_ids] = 0.0
+  force_pulse_pending = getattr(env, _FORCE_PULSE_PENDING_ATTR, None)
+  if not isinstance(force_pulse_pending, torch.Tensor) or force_pulse_pending.shape != (
+    env.num_envs,
+  ):
+    force_pulse_pending = torch.zeros(env.num_envs, dtype=torch.bool, device=env.device)
+    setattr(env, _FORCE_PULSE_PENDING_ATTR, force_pulse_pending)
+  force_pulse_pending[env_ids] = True
   _init_data_reset_obs_history_state(env)
   pending = getattr(env, _DATA_RESET_OBS_PENDING_ATTR)
   pool_row = getattr(env, _DATA_RESET_POOL_ROW_ATTR)
@@ -1065,73 +1236,73 @@ def reset_root_state_mixed(
     replay_samples = sampler.sample_for_sources(env_ids, use_data)
   else:
     replay_samples = {
-      "use_replay": torch.zeros(
-        len(env_ids), dtype=torch.bool, device=env.device
-      ),
+      "use_replay": torch.zeros(len(env_ids), dtype=torch.bool, device=env.device),
       "root_state_rel": torch.zeros(len(env_ids), 13, device=env.device),
-      "joint_pos": torch.zeros(
-        len(env_ids), asset.num_joints, device=env.device
-      ),
-      "joint_vel": torch.zeros(
-        len(env_ids), asset.num_joints, device=env.device
-      ),
+      "joint_pos": torch.zeros(len(env_ids), asset.num_joints, device=env.device),
+      "joint_vel": torch.zeros(len(env_ids), asset.num_joints, device=env.device),
       "data_state_id": torch.full(
         (len(env_ids),), -1, dtype=torch.long, device=env.device
       ),
       "reset_push": torch.zeros(len(env_ids), 6, device=env.device),
+      "reset_wrench": torch.zeros(len(env_ids), 6, device=env.device),
+      "reset_pulse_duration": torch.zeros(
+        len(env_ids), 1, dtype=torch.long, device=env.device
+      ),
     }
 
   episode_root_state = torch.zeros(len(env_ids), 13, device=env.device)
-  episode_joint_pos = torch.zeros(
-    len(env_ids), asset.num_joints, device=env.device
-  )
+  episode_joint_pos = torch.zeros(len(env_ids), asset.num_joints, device=env.device)
   episode_joint_vel = torch.zeros_like(episode_joint_pos)
   episode_data_state_ids = torch.full(
     (len(env_ids),), -1, dtype=torch.long, device=env.device
   )
 
-  tilt_local_ids = torch.nonzero(~use_data, as_tuple=False).squeeze(-1)
-  tilt_env_ids = env_ids[tilt_local_ids]
-  if tilt_env_ids.numel() > 0:
-    tilt_root, tilt_joint_pos, tilt_joint_vel = _sample_tilt_states(
+  stable_local_ids = torch.nonzero(~use_data, as_tuple=False).squeeze(-1)
+  stable_env_ids = env_ids[stable_local_ids]
+  if stable_env_ids.numel() > 0:
+    stable_root, stable_joint_pos, stable_joint_vel = _sample_stable_states(
       env=env,
       asset=asset,
-      env_ids=tilt_env_ids,
-      tilt_pose_range=tilt_pose_range,
-      tilt_velocity_range=tilt_velocity_range,
-      tilt_joint_position_range=tilt_joint_position_range,
-      tilt_joint_velocity_range=tilt_joint_velocity_range,
+      env_ids=stable_env_ids,
+      stable_state_files=stable_state_files,
+      stable_pose_range=stable_pose_range,
+      stable_joint_position_std=stable_joint_position_std,
+      stable_min_root_height=stable_min_root_height,
+      stable_max_root_linear_speed=stable_max_root_linear_speed,
+      stable_max_root_angular_speed=stable_max_root_angular_speed,
+      stable_max_abs_joint_velocity=stable_max_abs_joint_velocity,
     )
-    tilt_replay_mask = replay_samples["use_replay"][tilt_local_ids]
-    if tilt_replay_mask.any():
-      replay_local_ids = tilt_local_ids[tilt_replay_mask]
+    stable_replay_mask = replay_samples["use_replay"][stable_local_ids]
+    if stable_replay_mask.any():
+      replay_local_ids = stable_local_ids[stable_replay_mask]
       replay_env_ids = env_ids[replay_local_ids]
       replay_root, replay_joint_pos, replay_joint_vel = (
         _sample_near_random_failure_states(
           env=env,
           asset=asset,
           env_ids=replay_env_ids,
-          prototype_root_state_rel=replay_samples["root_state_rel"][
-            replay_local_ids
-          ],
+          prototype_root_state_rel=replay_samples["root_state_rel"][replay_local_ids],
           prototype_joint_pos=replay_samples["joint_pos"][replay_local_ids],
           prototype_joint_vel=replay_samples["joint_vel"][replay_local_ids],
-          tilt_pose_range=tilt_pose_range,
-          tilt_velocity_range=tilt_velocity_range,
-          tilt_joint_position_range=tilt_joint_position_range,
-          tilt_joint_velocity_range=tilt_joint_velocity_range,
+          stable_pose_range=stable_pose_range,
+          stable_joint_position_std=stable_joint_position_std,
           neighbor_scale=adaptive_neighbor_scale,
         )
       )
-      tilt_root[tilt_replay_mask] = replay_root
-      tilt_joint_pos[tilt_replay_mask] = replay_joint_pos
-      tilt_joint_vel[tilt_replay_mask] = replay_joint_vel
+      stable_root[stable_replay_mask] = replay_root
+      stable_joint_pos[stable_replay_mask] = replay_joint_pos
+      stable_joint_vel[stable_replay_mask] = replay_joint_vel
     _write_state_and_forward(
-      env, asset, tilt_env_ids, tilt_root, tilt_joint_pos, tilt_joint_vel
+      env,
+      asset,
+      stable_env_ids,
+      stable_root,
+      stable_joint_pos,
+      stable_joint_vel,
     )
-    episode_root_state[tilt_local_ids] = tilt_root
-    episode_joint_pos[tilt_local_ids] = tilt_joint_pos
-    episode_joint_vel[tilt_local_ids] = tilt_joint_vel
+    episode_root_state[stable_local_ids] = stable_root
+    episode_joint_pos[stable_local_ids] = stable_joint_pos
+    episode_joint_vel[stable_local_ids] = stable_joint_vel
 
   data_local_ids = torch.nonzero(use_data, as_tuple=False).squeeze(-1)
   data_env_ids = env_ids[data_local_ids]
@@ -1185,6 +1356,8 @@ def reset_root_state_mixed(
       joint_vel=episode_joint_vel,
       data_state_ids=episode_data_state_ids,
     )
+    return sampler.metrics()
+  return {}
 
 
 def push_by_setting_velocity_preserve_data(
@@ -1215,18 +1388,19 @@ def push_by_setting_velocity_preserve_data(
   )
   if isinstance(sampler, FallAdaptiveResetSampler):
     replay_mask = (
-      sampler.current_replayed[env_ids]
-      & ~sampler.current_data_mask[env_ids]
+      sampler.current_replayed[env_ids] & ~sampler.current_data_mask[env_ids]
     )
     if replay_mask.any():
       replay_env_ids = env_ids[replay_mask]
       replay_delta = sampler.replay_reset_push[replay_env_ids]
-      local_jitter = sample_uniform(
-        ranges[:, 0],
-        ranges[:, 1],
-        (len(replay_env_ids), 6),
-        device=env.device,
-      ) * sampler.neighbor_scale
+      local_jitter = (
+        _sample_centered_range_jitter(
+          ranges,
+          size=(len(replay_env_ids), 6),
+          device=env.device,
+        )
+        * sampler.neighbor_scale
+      )
       velocity_delta[replay_mask] = replay_delta + local_jitter
   vel_w = asset.data.root_link_vel_w[env_ids] + velocity_delta
   asset.write_root_link_velocity_to_sim(vel_w, env_ids=env_ids)
@@ -1240,14 +1414,14 @@ def apply_external_force_torque_axiswise(
   force_axis_range: dict[str, tuple[float, float]],
   torque_axis_range: dict[str, tuple[float, float]],
   asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
-) -> None:
+) -> tuple[torch.Tensor, torch.Tensor] | None:
   """Apply external wrench with per-axis ranges in world frame.
 
   force_axis_range keys: x, y, z
   torque_axis_range keys: roll, pitch, yaw
   """
   if env_ids.numel() == 0:
-    return
+    return None
   asset: Entity = env.scene[asset_cfg.name]
   num_bodies = (
     len(asset_cfg.body_ids)
@@ -1272,6 +1446,32 @@ def apply_external_force_torque_axiswise(
   torques = sample_uniform(
     torque_ranges[:, 0], torque_ranges[:, 1], size=size, device=env.device
   )
+  asset.write_external_wrench_to_sim(
+    forces, torques, env_ids=env_ids, body_ids=asset_cfg.body_ids
+  )
+  # PM1's reset pulse targets one torso body. Returning the applied vectors
+  # lets adaptive replay retain the actual sampled disturbance.
+  return forces[:, 0].clone(), torques[:, 0].clone()
+
+
+def _apply_external_wrench_vectors(
+  env: ManagerBasedRlEnv,
+  env_ids: torch.Tensor,
+  force_w: torch.Tensor,
+  torque_w: torch.Tensor,
+  asset_cfg: SceneEntityCfg,
+) -> None:
+  """Apply one force/torque vector per environment to selected bodies."""
+  if env_ids.numel() == 0:
+    return
+  asset: Entity = env.scene[asset_cfg.name]
+  num_bodies = (
+    len(asset_cfg.body_ids)
+    if isinstance(asset_cfg.body_ids, list)
+    else asset.num_bodies
+  )
+  forces = force_w.unsqueeze(1).expand(-1, num_bodies, -1).contiguous()
+  torques = torque_w.unsqueeze(1).expand(-1, num_bodies, -1).contiguous()
   asset.write_external_wrench_to_sim(
     forces, torques, env_ids=env_ids, body_ids=asset_cfg.body_ids
   )
@@ -1397,25 +1597,25 @@ def apply_external_force_torque_axiswise_pulse(
   setattr(env, _FORCE_PULSE_COOLDOWN_STEPS_LEFT_ATTR, cooldown_left)
 
   # 2) Start pulses for envs that were just reset in current env step.
-  regular_duration_steps = _sample_pulse_duration_steps(
-    env.device, duration_steps, duration_steps_range
-  )
-  data_duration_steps = 0
-  if data_direction_force_magnitude_range is not None:
-    data_duration_steps = _sample_pulse_duration_steps(
-      env.device,
-      None,
-      data_direction_duration_steps_range or duration_steps_range,
-    )
-  just_reset_env_ids = torch.nonzero(
-    env.episode_length_buf == 0, as_tuple=False
-  ).squeeze(-1)
+  pending = getattr(env, _FORCE_PULSE_PENDING_ATTR, None)
+  if isinstance(pending, torch.Tensor) and pending.shape == (env.num_envs,):
+    just_reset_env_ids = torch.nonzero(pending, as_tuple=False).squeeze(-1)
+    pending[just_reset_env_ids] = False
+  else:
+    # Compatibility fallback for callers that use this pulse manager without
+    # the fall task's reset event.
+    just_reset_env_ids = torch.nonzero(
+      env.episode_length_buf == 0, as_tuple=False
+    ).squeeze(-1)
   if just_reset_env_ids.numel() == 0:
     return
   if force_axis_range is None:
     force_axis_range = {}
   if torque_axis_range is None:
     torque_axis_range = {}
+  regular_duration_steps = _sample_pulse_duration_steps(
+    env.device, duration_steps, duration_steps_range
+  )
 
   steps_left[just_reset_env_ids] = 0
   data_mask = getattr(env, _LAST_RESET_DATA_MASK_ATTR, None)
@@ -1437,30 +1637,108 @@ def apply_external_force_torque_axiswise_pulse(
 
   separate_data_pulse = data_direction_force_magnitude_range is not None
   if preserve_data_reset_states or separate_data_pulse:
-    regular_target_env_ids = just_reset_env_ids[~data_mask[just_reset_env_ids]]
+    regular_candidate_env_ids = just_reset_env_ids[~data_mask[just_reset_env_ids]]
   else:
-    regular_target_env_ids = just_reset_env_ids
-  regular_target_env_ids = _filter_targets(
-    regular_target_env_ids, pulse_probability
-  )
-  if regular_duration_steps > 0 and regular_target_env_ids.numel() > 0:
-    apply_external_force_torque_axiswise(
-      env=env,
-      env_ids=regular_target_env_ids,
-      force_axis_range=force_axis_range,
-      torque_axis_range=torque_axis_range,
-      asset_cfg=asset_cfg,
+    regular_candidate_env_ids = just_reset_env_ids
+  sampler = getattr(env, _ADAPTIVE_SAMPLER_ATTR, None)
+  regular_target_env_ids = _filter_targets(regular_candidate_env_ids, pulse_probability)
+  # A selected replay must actually receive its stored pulse. Otherwise a
+  # leftover cooldown from the failed episode would silently turn disturbance
+  # replay into pose-only replay and corrupt its priority update.
+  if isinstance(sampler, FallAdaptiveResetSampler):
+    replay_candidate_mask = (
+      sampler.current_replayed[regular_candidate_env_ids]
+      & ~sampler.current_data_mask[regular_candidate_env_ids]
     )
-    steps_left[regular_target_env_ids] = regular_duration_steps
-    if cooldown_steps > 0:
-      cooldown_left[regular_target_env_ids] = int(cooldown_steps)
+    replay_candidate_env_ids = regular_candidate_env_ids[replay_candidate_mask]
+    if replay_candidate_env_ids.numel() > 0:
+      regular_target_env_ids = torch.unique(
+        torch.cat((regular_target_env_ids, replay_candidate_env_ids))
+      )
+  if regular_target_env_ids.numel() > 0:
+    durations = torch.full(
+      (len(regular_target_env_ids),),
+      regular_duration_steps,
+      dtype=torch.long,
+      device=env.device,
+    )
+    replay_mask = torch.zeros(
+      len(regular_target_env_ids), dtype=torch.bool, device=env.device
+    )
+    if isinstance(sampler, FallAdaptiveResetSampler):
+      replay_mask = (
+        sampler.current_replayed[regular_target_env_ids]
+        & ~sampler.current_data_mask[regular_target_env_ids]
+      )
+      if replay_mask.any():
+        replay_env_ids = regular_target_env_ids[replay_mask]
+        durations[replay_mask] = sampler.replay_reset_pulse_duration[replay_env_ids, 0]
 
-  if not separate_data_pulse or data_duration_steps <= 0:
+    active_mask = durations > 0
+    regular_target_env_ids = regular_target_env_ids[active_mask]
+    durations = durations[active_mask]
+    replay_mask = replay_mask[active_mask]
+    if regular_target_env_ids.numel() > 0:
+      fresh_mask = ~replay_mask
+      if fresh_mask.any():
+        fresh_env_ids = regular_target_env_ids[fresh_mask]
+        applied = apply_external_force_torque_axiswise(
+          env=env,
+          env_ids=fresh_env_ids,
+          force_axis_range=force_axis_range,
+          torque_axis_range=torque_axis_range,
+          asset_cfg=asset_cfg,
+        )
+        if isinstance(sampler, FallAdaptiveResetSampler) and applied is not None:
+          force_w, torque_w = applied
+          sampler.record_reset_force_pulse(
+            fresh_env_ids,
+            torch.cat((force_w, torque_w), dim=-1),
+            durations[fresh_mask],
+          )
+
+      if replay_mask.any() and isinstance(sampler, FallAdaptiveResetSampler):
+        replay_env_ids = regular_target_env_ids[replay_mask]
+        replay_wrench = sampler.replay_reset_wrench[replay_env_ids].clone()
+        ranges = torch.tensor(
+          [force_axis_range.get(key, (0.0, 0.0)) for key in ("x", "y", "z")]
+          + [
+            torque_axis_range.get(key, (0.0, 0.0)) for key in ("roll", "pitch", "yaw")
+          ],
+          device=env.device,
+          dtype=torch.float32,
+        )
+        replay_wrench += (
+          _sample_centered_range_jitter(
+            ranges,
+            size=(len(replay_env_ids), 6),
+            device=env.device,
+          )
+          * sampler.neighbor_scale
+        )
+        _apply_external_wrench_vectors(
+          env=env,
+          env_ids=replay_env_ids,
+          force_w=replay_wrench[:, :3],
+          torque_w=replay_wrench[:, 3:],
+          asset_cfg=asset_cfg,
+        )
+        sampler.record_reset_force_pulse(
+          replay_env_ids,
+          replay_wrench,
+          durations[replay_mask],
+        )
+
+      steps_left[regular_target_env_ids] = durations
+      if cooldown_steps > 0:
+        cooldown_left[regular_target_env_ids] = int(cooldown_steps)
+
+  if not separate_data_pulse:
     return
   data_direction_w = getattr(env, _LAST_RESET_DATA_DIRECTION_ATTR, None)
-  if (
-    not isinstance(data_direction_w, torch.Tensor)
-    or data_direction_w.shape != (env.num_envs, 3)
+  if not isinstance(data_direction_w, torch.Tensor) or data_direction_w.shape != (
+    env.num_envs,
+    3,
   ):
     return
   data_target_env_ids = just_reset_env_ids[data_mask[just_reset_env_ids]]
@@ -1474,6 +1752,13 @@ def apply_external_force_torque_axiswise_pulse(
     data_target_env_ids, data_direction_force_probability
   )
   if data_target_env_ids.numel() == 0:
+    return
+  data_duration_steps = _sample_pulse_duration_steps(
+    env.device,
+    None,
+    data_direction_duration_steps_range or duration_steps_range,
+  )
+  if data_duration_steps <= 0:
     return
   apply_external_force_directional(
     env=env,
@@ -1522,7 +1807,9 @@ def randomize_gravity(
   tilt_quat = quat_from_euler_xyz(roll, pitch, torch.zeros_like(roll))
   g_tilted = quat_apply(tilt_quat, g_unit.unsqueeze(0).expand(n, -1))
   g_world = g_tilted * (magnitude * g_scale).unsqueeze(-1)
-  g_dir = g_world / torch.linalg.vector_norm(g_world, dim=-1, keepdim=True).clamp_min(1e-6)
+  g_dir = g_world / torch.linalg.vector_norm(g_world, dim=-1, keepdim=True).clamp_min(
+    1e-6
+  )
 
   gravity_field = env.sim.model.opt.gravity
   if gravity_field.ndim == 1 or gravity_field.shape[0] == 1:

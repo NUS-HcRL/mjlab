@@ -14,7 +14,11 @@ from mjlab.asset_zoo.robots.engineai_pm01.pm01_8 import (
 )
 from mjlab.envs import ManagerBasedRlEnvCfg
 from mjlab.envs.mdp.actions import JointPositionActionCfg
-from mjlab.managers.manager_term_config import CurriculumTermCfg, RewardTermCfg
+from mjlab.managers.manager_term_config import (
+  CurriculumTermCfg,
+  EventTermCfg,
+  RewardTermCfg,
+)
 from mjlab.managers.scene_entity_config import SceneEntityCfg
 from mjlab.sensor import ContactMatch, ContactSensorCfg
 from mjlab.tasks.fall import mdp
@@ -37,8 +41,6 @@ def freeze_curriculum_to_final_stage(cfg: ManagerBasedRlEnvCfg) -> None:
 
   stage_param_names = {
     "task_reward_weight": "stages",
-    "reset_init": "init_stages",
-    "reset_push": "push_stages",
     "reset_force_pulse": "pulse_stages",
     "q25_effort_limit": "effort_stages",
   }
@@ -75,10 +77,24 @@ def _pm1_fall_reset_motion_csv_paths(
   return tuple(paths)
 
 
+def _pm1_stable_reset_state_paths() -> tuple[str, ...]:
+  """Return the verified PM1 complete-state reset recordings."""
+  repo_root = Path(__file__).resolve().parents[6]
+  data_dir = repo_root / "data" / "robot_state"
+  filenames = (
+    "back_walk.npy",
+    "dance.npy",
+    "forward_walk.npy",
+    "left_walk.npy",
+    "right_walk.npy",
+  )
+  return tuple(str(data_dir / filename) for filename in filenames)
+
+
 def pm1_flat_falling_env_cfg(
   has_state_estimation: bool = True,
   play: bool = False,
-  use_data_reset: bool = True,
+  use_data_reset: bool = False,
   use_data_reset_obs_history: bool = False,
   protective_finetune: bool = False,
   freeze_curriculum: bool = False,
@@ -90,13 +106,13 @@ def pm1_flat_falling_env_cfg(
   freeze_curriculum: If True, keep curriculum terms at their final stages from
     step 0 (no protective-finetune reward / robot changes).
   """
-  del has_state_estimation  # Unused for fall; policy has no motion anchor / base_lin_vel
+  del (
+    has_state_estimation
+  )  # Unused for fall; policy has no motion anchor / base_lin_vel
   cfg = make_fall_env_cfg()
 
   cfg.scene.entities = {
-    "robot": PM_PROTECTIVE_FINETUNE_ROBOT_CFG
-    if protective_finetune
-    else PM_ROBOT_CFG
+    "robot": PM_PROTECTIVE_FINETUNE_ROBOT_CFG if protective_finetune else PM_ROBOT_CFG
   }
 
   # Self-collision detection for PM1
@@ -129,7 +145,10 @@ def pm1_flat_falling_env_cfg(
     track_air_time=True,
   )
 
-  cfg.scene.sensors = (self_collision_cfg, body_contact_force_cfg,)
+  cfg.scene.sensors = (
+    self_collision_cfg,
+    body_contact_force_cfg,
+  )
 
   joint_pos_action = cfg.actions["joint_pos"]
   assert isinstance(joint_pos_action, JointPositionActionCfg)
@@ -143,7 +162,6 @@ def pm1_flat_falling_env_cfg(
     "robot",
     body_names=("LINK_TORSO_YAW",),
   )
-
   forbidden_body_names = (
     "LINK_HEAD_YAW",
     "LINK_TORSO_YAW",
@@ -169,12 +187,12 @@ def pm1_flat_falling_env_cfg(
     "LINK_SHOULDER_ROLL_L": 500.0,
     "LINK_SHOULDER_ROLL_R": 500.0,
   }
-  cfg.terminations["forbidden_body_contact_force"].params[
-    "body_names"
-  ] = forbidden_body_names
-  cfg.terminations["forbidden_body_contact_force"].params[
-    "body_force_thresholds"
-  ] = forbidden_termination_force_thresholds
+  cfg.terminations["forbidden_body_contact_force"].params["body_names"] = (
+    forbidden_body_names
+  )
+  cfg.terminations["forbidden_body_contact_force"].params["body_force_thresholds"] = (
+    forbidden_termination_force_thresholds
+  )
   forbidden_force_reward = cfg.rewards.get("forbidden_contact_force_penalty")
   if forbidden_force_reward is not None:
     # Penalize excessive force before it reaches the fixed termination threshold.
@@ -215,21 +233,20 @@ def pm1_flat_falling_env_cfg(
   #   cfg.rewards["base_height"].params["nominal_height"] = 0.82
 
   cfg.viewer.body_name = "LINK_TORSO_YAW"
+  cfg.events["reset_base"].params["stable_state_files"] = (
+    _pm1_stable_reset_state_paths()
+  )
   cfg.events["reset_base"].params["motion_files"] = (
     _pm1_fall_reset_motion_csv_paths(use_data_reset_obs_history)
     if use_data_reset
     else ()
   )
-  cfg.events["reset_base"].params[
-    "use_data_reset_obs_history"
-  ] = use_data_reset_obs_history
+  cfg.events["reset_base"].params["data_probability"] = 0.15 if use_data_reset else 0.0
+  cfg.events["reset_base"].params["use_data_reset_obs_history"] = (
+    use_data_reset_obs_history
+  )
   # cfg.events["reset_base"].params["motion_files"] = ("data/fall_with_obs_history/policy_switch_walking_combined.csv",)
   cfg.events["reset_base"].params["data_root_body_name"] = "LINK_BASE"
-  if not use_data_reset and cfg.curriculum is not None and "reset_init" in cfg.curriculum:
-    init_stages = cfg.curriculum["reset_init"].params["init_stages"]
-    for stage in init_stages:
-      stage["data_probability"] = 0.0
-
   # AMP: expert ``.npz`` only (do not mix with reset CSV pool above).
   if cfg.amp is not None:
     cfg.amp.motion_file = [
@@ -245,31 +262,41 @@ def pm1_flat_falling_env_cfg(
   # PM1 IMU 传感器名与 G1 不同：imu_angular_velocity / imu_link_linear_velocity
   for group in ("policy", "critic"):
     if "base_ang_vel" in cfg.observations[group].terms:
-      cfg.observations[group].terms["base_ang_vel"].params["sensor_name"] = "robot/imu_angular_velocity"
+      cfg.observations[group].terms["base_ang_vel"].params["sensor_name"] = (
+        "robot/imu_angular_velocity"
+      )
     if "base_lin_vel" in cfg.observations[group].terms:
-      cfg.observations[group].terms["base_lin_vel"].params["sensor_name"] = "robot/imu_link_linear_velocity"
+      cfg.observations[group].terms["base_lin_vel"].params["sensor_name"] = (
+        "robot/imu_link_linear_velocity"
+      )
 
   if play:
     cfg.episode_length_s = int(1e9)
     cfg.observations["policy"].enable_corruption = False
     cfg.events.pop("push_robot", None)
     cfg.events.pop("push_force_pulse", None)
+    # Interval events are not evaluated by the initial manual reset, and play
+    # episodes are effectively infinite. Use a deterministic one-off velocity
+    # push only in play mode so the first episode still enters a fall.
+    cfg.events["push_at_reset"] = EventTermCfg(
+      func=mdp.push_by_setting_velocity_preserve_data,
+      mode="reset",
+      params={
+        "velocity_range": {
+          "x": (1.0, 1.0),
+          "y": (0.0, 0.0),
+          "z": (0.0, 0.0),
+          "roll": (0.0, 0.0),
+          "pitch": (0.0, 0.0),
+          "yaw": (0.0, 0.0),
+        },
+        "preserve_data_reset_states": True,
+      },
+    )
     if cfg.curriculum is not None:
-      cfg.curriculum.pop("reset_init", None)
-      cfg.curriculum.pop("reset_push", None)
       cfg.curriculum.pop("reset_force_pulse", None)
       if not protective_finetune:
         cfg.curriculum.pop("q25_effort_limit", None)
-    if "push_at_reset" in cfg.events:
-      # In play mode, use a deterministic forward push so resets are reproducible.
-      cfg.events["push_at_reset"].params["velocity_range"] = {
-        "x": (1.0, 1.0),
-        "y": (0.0, 0.0),
-        "z": (0.0, 0.0),
-        "roll": (0.0, 0.0),
-        "pitch": (0.0, 0.0),
-        "yaw": (0.0, 0.0),
-      }
     cfg.events["reset_base"].params["data_probability"] = 0.0
 
   return cfg

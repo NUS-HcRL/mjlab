@@ -27,12 +27,10 @@ from mjlab.tasks.fall import mdp
 from mjlab.tasks.fall.mdp.curriculums import (
   q25_effort_limit_curriculum,
   reset_force_pulse_curriculum,
-  reset_initialization_curriculum,
   task_reward_weight_curriculum,
 )
 from mjlab.tasks.fall.mdp.events import (
   apply_external_force_torque_axiswise_pulse,
-  push_by_setting_velocity_preserve_data,
   randomize_gravity,
 )
 from mjlab.tasks.fall.mdp.terminations import nonfinite_state
@@ -138,92 +136,72 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
       func=mdp.reset_root_state_mixed,
       mode="reset",
       params={
-        "tilt_pose_range": {
-          "x": (-1.2, 1.2),
-          "y": (-1.2, 1.2),
-          "z": (0, 0.08),
-          "roll": (-0.1, 0.1),
-          "pitch": (-0.1, 0.1),
-          "yaw": (-3.14, 3.14),
+        # Robot-specific configs provide complete trajectory states: time,
+        # root pose/velocity, and joint position/velocity. Fresh episodes
+        # sample files uniformly, then frames uniformly within a file.
+        "stable_state_files": (),
+        "stable_pose_range": {
+          "x": (-0.05, 0.05),
+          "y": (-0.05, 0.05),
+          # Only lift the source state; never introduce ground penetration.
+          "z": (0.00, 0.02),
+          "roll": (0.0, 0.0),
+          "pitch": (0.0, 0.0),
+          "yaw": (-0.05, 0.05),
         },
-        "tilt_velocity_range": {},
-        "tilt_joint_position_range": (-0.25, 0.25),
-        "tilt_joint_velocity_range": (-0.1, 0.1),
-        "data_probability": 0.15,
+        # Preserve the recorded position/velocity pair exactly. The external
+        # force pulse remains the intended fall-triggering perturbation.
+        "stable_joint_position_std": 0.0,
+        "stable_min_root_height": 0.60,
+        "stable_max_root_linear_speed": 3.0,
+        "stable_max_root_angular_speed": 10.0,
+        "stable_max_abs_joint_velocity": 40.0,
+        # Trajectory data reset remains available as an explicit opt-in, but
+        # stable-state reset is the default training distribution.
+        "data_probability": 0.0,
         "motion_files": (),
         "data_root_body_name": "LINK_BASE",
         "data_pose_range": {
-          "x": (-0.20, 0.20),
-          "y": (-0.20, 0.20),
-          "z": (0.00, 0.05),
-          "roll": (-0.08, 0.08),
-          "pitch": (-0.08, 0.08),
-          "yaw": (-3.14, 3.14),
+          "x": (-0.05, 0.05),
+          "y": (-0.05, 0.05),
+          "z": (0.00, 0.02),
+          "roll": (0.0, 0.0),
+          "pitch": (0.0, 0.0),
+          "yaw": (-0.05, 0.05),
         },
-        "data_velocity_range": {
-          "x": (-0.50, 0.50),
-          "y": (-0.50, 0.50),
-          "z": (-0.20, 0.20),
-          "roll": (-0.40, 0.40),
-          "pitch": (-0.40, 0.40),
-          "yaw": (-0.50, 0.50),
-        },
-        "data_joint_position_range": (-0.12, 0.12),
-        "data_joint_velocity_range": (-0.12, 0.12),
+        "data_velocity_range": {},
+        "data_joint_position_range": (-0.03, 0.03),
+        "data_joint_velocity_range": (0.0, 0.0),
         "data_min_root_height": 0.25,
         "data_max_abs_joint_velocity": 40.0,
         "data_low_clearance_height": 0.35,
-        # Keep uniform/curriculum sampling as the exploration floor while
+        # Keep fresh stable-state sampling as the exploration floor while
         # replaying neighborhoods of safety-critical terminated episodes.
         "adaptive_sampling": True,
         "adaptive_buffer_size": 4096,
-        "adaptive_replay_probability": 0.5,
-        "adaptive_min_failures": 1,
+        "adaptive_replay_probability": 0.2,
+        "adaptive_min_failures": 128,
         "adaptive_neighbor_scale": 0.15,
+        # Tracking-style priority mixture: successful replays gradually lose
+        # priority, while the uniform component prevents mode collapse.
+        "adaptive_uniform_ratio": 0.2,
+        "adaptive_priority_alpha": 0.05,
         "adaptive_failure_term_names": ("forbidden_body_contact_force",),
       },
     ),
-    # Apply an extra reset push only to non-data initializations so motion-derived
-    # root velocities remain unchanged.
-    "push_at_reset": EventTermCfg(
-      func=push_by_setting_velocity_preserve_data,
-      mode="reset",
-      params={
-        "velocity_range": {
-          "x": (-1.0, 1.0),
-          "y": (-1.0, 1.0),
-          "z": (-0.3, 0.3),
-          "roll": (-0.5, 0.5),
-          "pitch": (-0.5, 0.5),
-          "yaw": (-0.5, 0.5),
-        },
-        "preserve_data_reset_states": True,
-      },
-    ),
-    # Single pulse event: detects just-reset envs, applies force pulse, and
-    # decrements/clears pulses every step.
+    # Apply the fall-triggering pulse after the complete-state reset. The pulse
+    # manager runs every step so it can hold and then clear the external wrench.
     "push_force_pulse": EventTermCfg(
       func=apply_external_force_torque_axiswise_pulse,
       mode="interval",
       interval_range_s=(0.0, 0.0),
       params={
-        # World-frame external force range per axis.
-        "force_axis_range": {
-          # "x": (-200.0, 200.0),
-          # "y": (-200.0, 200.0),
-          # "z": (-30.0, -30.0),
-        },
-        # World-frame external torque range per axis.
-        "torque_axis_range": {
-          # "roll": (-12.0, 12.0),
-          # "pitch": (-20.0, -5.0),
-          # "yaw": (-10.0, 10.0),
-        },
+        "force_axis_range": {},
+        "torque_axis_range": {},
         "duration_steps_range": (0, 1),
-        # Enforce cooldown to avoid too many consecutive high-impact episodes.
         "cooldown_steps": 200,
-        # CSV reset states are already falling. Reinforce the recorded direction
-        # with a short, small pulse instead of applying the random curriculum force.
+        # Optional trajectory-data resets use their labeled direction and do
+        # not enter random-reset disturbance replay.
         "data_direction_force_magnitude_range": (30.0, 80.0),
         "data_direction_force_probability": 0.5,
         "data_direction_duration_steps_range": (2, 6),
@@ -474,95 +452,6 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
         ],
       },
     ),
-    "reset_init": CurriculumTermCfg(
-      func=reset_initialization_curriculum,
-      params={
-        "event_name": "reset_base",
-        "init_stages": [
-          {
-            "step": 0,
-            "data_probability": 0.05,
-            "tilt_pose_range": {
-              "x": (-0.4, 0.4),
-              "y": (-0.4, 0.4),
-              "z": (0.00, 0.06),
-              "roll": (-0.10, 0.10),
-              "pitch": (-0.10, 0.10),
-              "yaw": (-3.14, 3.14),
-            },
-            "tilt_velocity_range": {},
-            "tilt_joint_position_range": (-0.08, 0.08),
-            "tilt_joint_velocity_range": (-0.04, 0.04),
-          },
-          {
-            "step": 6_000 * 32,
-            "data_probability": 0.18,
-            "tilt_pose_range": {
-              "x": (-0.6, 0.6),
-              "y": (-0.6, 0.6),
-              "z": (0.00, 0.1),
-              "roll": (-0.15, 0.15),
-              "pitch": (-0.15, 0.15),
-              "yaw": (-3.14, 3.14),
-            },
-            "tilt_velocity_range": {},
-            "tilt_joint_position_range": (-0.15, 0.15),
-            "tilt_joint_velocity_range": (-0.07, 0.07),
-          },
-          {
-            "step": 16_000 * 32,
-            "data_probability": 0.35,
-            "tilt_pose_range": {
-              "x": (-1, 1),
-              "y": (-1, 1),
-              "z": (0.00, 0.1),
-              "roll": (-0.20, 0.20),
-              "pitch": (-0.20, 0.20),
-              "yaw": (-3.14, 3.14),
-            },
-            "tilt_velocity_range": {},
-            "tilt_joint_position_range": (-0.25, 0.25),
-            "tilt_joint_velocity_range": (-0.1, 0.1),
-          },
-        ],
-      },
-    ),
-    # "reset_push": CurriculumTermCfg(
-    #   func=reset_push_curriculum,
-    #   params={
-    #     "event_name": "push_at_reset",
-    #     # env.common_step_counter counts env steps, not iterations.
-    #     "push_stages": [
-    #       {
-    #         "step": 0,
-    #         "x": (-1.0, 1.0),
-    #         "y": (-1.0, 1.0),
-    #         "z": (-0.1, 0.1),
-    #         "roll": (-0.2, 0.2),
-    #         "pitch": (-0.2, 0.2),
-    #         "yaw": (-0.3, 0.3),
-    #       },
-    #       {
-    #         "step": 8_000 * 32,
-    #         "x": (-3.0, 3.0),
-    #         "y": (-3.0, 3.0),
-    #         "z": (-0.15, 0.15),
-    #         "roll": (-0.5, 0.5),
-    #         "pitch": (-0.5, 0.5),
-    #         "yaw": (-0.4, 0.4),
-    #       },
-    #       {
-    #         "step": 15000 * 32,
-    #         "x": (-5.0, 5.0),
-    #         "y": (-5.0, 5.0),
-    #         "z": (-0.2, 0.2),
-    #         "roll": (-1, 1),
-    #         "pitch": (-1, 1),
-    #         "yaw": (-0.5, 0.5),
-    #       },
-    #     ],
-    #   },
-    # ),
     "reset_force_pulse": CurriculumTermCfg(
       func=reset_force_pulse_curriculum,
       params={
