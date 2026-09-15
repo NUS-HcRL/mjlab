@@ -251,12 +251,12 @@ def pm1_flat_falling_env_cfg(
   if cfg.amp is not None:
     cfg.amp.motion_file = [
       "motion_file/pm_fall4:v0/Back_3_converted.npz",
-      "motion_file/pm_fall4:v0/Front_3_converted.npz",
+      "motion_file/pm_fall4:v0/Front_1_converted_50fps.npz",
       "motion_file/pm_fall4:v0/Left_1_converted_50fps.npz",
       "motion_file/pm_fall4:v0/Right_1_converted_50fps.npz",
-      "motion_file/pm_fall4:v0/LeftFront_3_converted.npz",
+      "motion_file/pm_fall4:v0/LeftFront_1_converted_50fps.npz",
       "motion_file/pm_fall4:v0/LeftBack_3_converted.npz",
-      "motion_file/pm_fall4:v0/RightFront_3_converted.npz",
+      "motion_file/pm_fall4:v0/RightFront_1_converted_50fps.npz",
       "motion_file/pm_fall4:v0/RightBack_3_converted.npz",
     ]
   # PM1 IMU 传感器名与 G1 不同：imu_angular_velocity / imu_link_linear_velocity

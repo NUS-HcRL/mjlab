@@ -680,7 +680,10 @@ def _sample_stable_states(
   stable_max_root_linear_speed: float | None = None,
   stable_max_root_angular_speed: float | None = None,
   stable_max_abs_joint_velocity: float | None = None,
+  stable_standing_probability: float = 0.0,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+  if not 0.0 <= stable_standing_probability <= 1.0:
+    raise ValueError("stable_standing_probability must be between 0 and 1.")
   root_state, joint_pos, joint_vel = _default_states(env, asset, env_ids)
 
   if stable_state_files:
@@ -777,6 +780,22 @@ def _sample_stable_states(
   assert joint_pos_limits is not None
   joint_limits = joint_pos_limits[env_ids]
   joint_pos = joint_pos.clamp_(joint_limits[..., 0], joint_limits[..., 1])
+
+  if stable_standing_probability > 0.0:
+    # A separate fresh-reset source: exactly the configured initial standing
+    # pose, with zero velocity and no trajectory pose/joint jitter. Replay is
+    # applied by the caller afterwards and retains its stored initial state.
+    standing = (
+      torch.rand(len(env_ids), device=env.device) < stable_standing_probability
+    )[:, None]
+    standing_root, standing_joints, standing_joint_vel = _default_states(
+      env, asset, env_ids
+    )
+    standing_root[:, 7:13] = 0.0
+    standing_joint_vel.zero_()
+    root_state = torch.where(standing, standing_root, root_state)
+    joint_pos = torch.where(standing, standing_joints, joint_pos)
+    joint_vel = torch.where(standing, standing_joint_vel, joint_vel)
 
   return root_state, joint_pos, joint_vel
 
@@ -1174,8 +1193,11 @@ def reset_root_state_mixed(
   adaptive_priority_alpha: float = 0.05,
   adaptive_failure_term_names: Sequence[str] = ("forbidden_body_contact_force",),
   asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
+  stable_standing_probability: float = 0.0,
 ) -> dict[str, torch.Tensor]:
   """Reset from complete stable/data states and replay failed neighborhoods."""
+  if not 0.0 <= stable_standing_probability <= 1.0:
+    raise ValueError("stable_standing_probability must be between 0 and 1.")
   if env_ids is None:
     env_ids = torch.arange(env.num_envs, device=env.device, dtype=torch.int)
   else:
@@ -1271,6 +1293,7 @@ def reset_root_state_mixed(
       stable_max_root_linear_speed=stable_max_root_linear_speed,
       stable_max_root_angular_speed=stable_max_root_angular_speed,
       stable_max_abs_joint_velocity=stable_max_abs_joint_velocity,
+      stable_standing_probability=stable_standing_probability,
     )
     stable_replay_mask = replay_samples["use_replay"][stable_local_ids]
     if stable_replay_mask.any():

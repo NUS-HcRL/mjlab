@@ -140,6 +140,9 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
         # root pose/velocity, and joint position/velocity. Fresh episodes
         # sample files uniformly, then frames uniformly within a file.
         "stable_state_files": (),
+        # Share of fresh non-data resets using the exact initial standing pose
+        # and zero velocities. The remaining fresh samples come from recordings.
+        "stable_standing_probability": 0.05,
         "stable_pose_range": {
           "x": (-0.05, 0.05),
           "y": (-0.05, 0.05),
@@ -179,7 +182,7 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
         # replaying neighborhoods of safety-critical terminated episodes.
         "adaptive_sampling": True,
         "adaptive_buffer_size": 4096,
-        "adaptive_replay_probability": 0.2,
+        "adaptive_replay_probability": 0.0,
         "adaptive_min_failures": 128,
         "adaptive_neighbor_scale": 0.15,
         # Tracking-style priority mixture: successful replays gradually lose
@@ -298,7 +301,8 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
         squash_scale=0.0,
         max_penalty=2.0,
         body_force_scales={},
-        default_force_scale=1000.0,
+        # All bodies without an explicit per-robot reference use this scale.
+        default_force_scale=3000.0,
         tracked_body_names=(
           "LINK_HEAD_YAW",
           "LINK_TORSO_YAW",

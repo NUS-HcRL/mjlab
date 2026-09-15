@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from unittest.mock import Mock
 
 import numpy as np
+import pytest
 import torch
 
 from mjlab.tasks.fall.mdp import events
@@ -107,7 +108,10 @@ def test_stable_state_loader_restores_complete_state_and_filters_limits(tmp_path
   assert torch.allclose(state["joint_vel"], torch.tensor([[-0.75]]))
 
 
-def test_stable_state_sampling_discards_recorded_xy_translation(tmp_path):
+@pytest.mark.parametrize("standing_probability", [0.0, 1.0])
+def test_stable_state_sampling_discards_recorded_xy_translation(
+  tmp_path, standing_probability
+):
   path = tmp_path / "stable.npy"
   # time + root state (13) + two joint positions + two joint velocities.
   np.save(
@@ -160,10 +164,21 @@ def test_stable_state_sampling_discards_recorded_xy_translation(tmp_path):
     asset=asset,
     env_ids=torch.tensor([0]),
     stable_state_files=(str(path),),
-    stable_pose_range={},
+    # Standing must bypass even the configured nonzero pose jitter.
+    stable_pose_range={"z": (0.02, 0.02), "yaw": (0.1, 0.1)}
+    if standing_probability else {},
     stable_joint_position_std=0.0,
     stable_min_root_height=0.6,
+    stable_standing_probability=standing_probability,
   )
+
+  if standing_probability:
+    assert torch.allclose(root_state[0, :3], torch.tensor([10.0, 20.0, 0.82]))
+    assert torch.equal(root_state[:, 3:7], asset.data.default_root_state[:, 3:7])
+    assert torch.equal(root_state[:, 7:13], torch.zeros(1, 6))
+    assert torch.equal(joint_pos, asset.data.default_joint_pos)
+    assert torch.equal(joint_vel, torch.zeros(1, 2))
+    return
 
   assert torch.allclose(root_state[0, :3], torch.tensor([10.0, 20.0, 0.8]))
   assert torch.allclose(root_state[0, 3:7], torch.tensor([1.0, 0.0, 0.0, 0.0]))

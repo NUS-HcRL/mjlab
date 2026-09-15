@@ -22,6 +22,7 @@ from mjlab.utils.lab_api.math import (
   quat_mul,
   subtract_frame_transforms,
 )
+from mjlab.utils.motion_resampling import resample_motion_arrays
 from mjlab.utils.spaces import Box
 
 if TYPE_CHECKING:
@@ -393,7 +394,13 @@ class AMPHelper:
     if path.endswith(".npz"):
       # NPZ path: same semantics as tracking MotionLoader (joint_pos, joint_vel,
       # and either root_* or body_* arrays for determining root state).
-      data = np.load(path)
+      # Resample once on CPU, before constructing cached discriminator windows.
+      # Adjacent expert frames must span the same physical time as policy steps.
+      with np.load(path) as archive:
+        try:
+          data = resample_motion_arrays(dict(archive), self._env.step_dt)
+        except ValueError as exc:
+          raise ValueError(f"Invalid AMP motion '{path}': {exc}") from exc
       joint_pos = torch.from_numpy(data["joint_pos"]).float().to(self._device)
       joint_vel = torch.from_numpy(data["joint_vel"]).float().to(self._device)
       if joint_pos.ndim == 2:
