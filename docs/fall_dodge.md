@@ -43,7 +43,7 @@ Sampling settings are exposed under `env.commands.dodge` in the training config.
 
 | Setting | Default | Meaning |
 | --- | --- | --- |
-| `probability` | `0.2` | Probability of requesting a region at reset |
+| `probability` | `0.5` | Task override: probability of requesting a region at reset |
 | `motion_observation_steps` | `3` | Post-reset frames observed before activation |
 | `reference_frame` | `yaw` | Yaw-only or full-root relative observation frame |
 | `radius_range` | `(0.08, 0.14)` m | Radius of the forbidden ground disc |
@@ -60,7 +60,7 @@ Sampling settings are exposed under `env.commands.dodge` in the training config.
 | reward `dodge_predicted_landing_risk.weight` | `-0.5` | Predicted landing risk multiplier |
 
 These are the current settings after W&B-guided tuning.
-The actual active fraction can be lower than 20%: late fall resets and candidates
+The actual active fraction can be lower than 50%: late fall resets and candidates
 overlapping low bodies are rejected. Existing reset states are never resampled or
 modified to accommodate an obstacle. Placement waits for three completed control
 frames after reset, blends displacement-derived and current root velocity, then

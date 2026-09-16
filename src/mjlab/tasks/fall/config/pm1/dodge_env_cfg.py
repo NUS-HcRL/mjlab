@@ -34,7 +34,7 @@ def pm1_flat_falling_dodge_env_cfg(
       "motion_file/pm_fall4:v0/tofront_dodgeright_v2.3_50fps.npz",
     )
   )
-  cfg.commands = {"dodge": DodgeRegionCommandCfg()}
+  cfg.commands = {"dodge": DodgeRegionCommandCfg(probability=0.5)}
   for group in ("policy", "critic"):
     cfg.observations[group].terms["dodge_region"] = ObservationTermCfg(
       func=dodge_region_observation,
@@ -89,6 +89,9 @@ def pm1_flat_falling_dodge_env_cfg(
 def pm1_falling_amp_dodge_runner_cfg() -> RslRlOnPolicyRunnerCfg:
   """Use fall AMP/PPO settings with a separate experiment directory."""
   cfg = pm1_falling_amp_runner_cfg()
+  cfg.algorithm.reward_mix_scale_clip = (
+    0.02, cfg.algorithm.reward_mix_scale_clip[1]
+  )
   cfg.algorithm.kl_early_stop = False
   cfg.experiment_name = "pm1_falling_amp_dodge"
   # W&B sequential run names become dodge1, dodge2, ... (not mjlab1, ...).

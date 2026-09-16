@@ -330,7 +330,7 @@ def test_dodge_only_adds_expected_extensions_to_fall(play):
     "motion_file/pm_fall4:v0/tofront_dodgeright_v2.3_50fps.npz",
   ]
   dodge.amp.motion_file = base.amp.motion_file
-  assert dodge.commands["dodge"].probability == 0.2
+  assert dodge.commands["dodge"].probability == 0.5
   assert dodge.commands["dodge"].landing_lead_distance == 0.35
   for group in ("policy", "critic"):
     term = dodge.observations[group].terms.pop("dodge_region")
@@ -379,6 +379,10 @@ def test_registry_and_runner_preserve_original_amp_settings():
   runner.run_name = base.run_name
   assert runner.algorithm.kl_early_stop is False
   runner.algorithm.kl_early_stop = base.algorithm.kl_early_stop
+  assert runner.algorithm.reward_mix_scale_clip == (
+    0.02, base.algorithm.reward_mix_scale_clip[1]
+  )
+  runner.algorithm.reward_mix_scale_clip = base.algorithm.reward_mix_scale_clip
   assert snapshot(runner) == snapshot(base)
 
 
