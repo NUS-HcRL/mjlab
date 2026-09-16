@@ -189,3 +189,27 @@ def nonfinite_state(
       continue
     bad |= ~torch.isfinite(tensor).all(dim=-1).reshape(env.num_envs, -1).all(dim=-1)
   return bad
+
+
+def invalid_physics_state(
+  env: ManagerBasedRlEnv,
+  sensor_name: str,
+  asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
+  max_body_linear_speed: float = 20.0,
+  max_joint_speed: float = 100.0,
+  max_contact_force: float = 20_000.0,
+) -> torch.Tensor:
+  """Terminate finite but physically pathological simulator states."""
+  asset: Entity = env.scene[asset_cfg.name]
+  sensor: ContactSensor = env.scene[sensor_name]
+  assert sensor.data.force is not None
+
+  body_speed = torch.linalg.vector_norm(asset.data.body_link_lin_vel_w, dim=-1)
+  joint_speed = asset.data.joint_vel.abs()
+  contact_force = torch.linalg.vector_norm(sensor.data.force, dim=-1)
+
+  return (
+    (body_speed > max_body_linear_speed).any(dim=-1)
+    | (joint_speed > max_joint_speed).any(dim=-1)
+    | (contact_force > max_contact_force).any(dim=-1)
+  )

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 from types import MethodType
 from typing import Literal
 
@@ -36,6 +37,24 @@ def _validate_task(task: str) -> None:
     raise ValueError(f"Unknown task '{task}'.")
 
 
+def _resolve_motion_files(params: dict) -> tuple[str, ...]:
+  motion_files = tuple(params.get("motion_files", ()))
+  if motion_files:
+    return motion_files
+  repo_root = Path(__file__).resolve().parents[3]
+  motion_files = tuple(
+    str(path)
+    for directory in (
+      repo_root / "data" / "fall_with_obs_history",
+      repo_root / "data" / "fall_without_obs_history",
+    )
+    for path in sorted(directory.glob("*.csv"))
+  )
+  if not motion_files:
+    raise RuntimeError("No fall reset CSV files were found under data/.")
+  return motion_files
+
+
 def _sample_one_data_reset_state(env: ManagerBasedRlEnv, keep_push: bool) -> None:
   reset_term = env.cfg.events.get("reset_base")
   if reset_term is None:
@@ -43,16 +62,13 @@ def _sample_one_data_reset_state(env: ManagerBasedRlEnv, keep_push: bool) -> Non
   params = dict(reset_term.params)
 
   params["data_probability"] = 1.0
-  params["tilt_pose_range"] = {}
-  params["tilt_velocity_range"] = {}
-  params["tilt_joint_position_range"] = (0.0, 0.0)
-  params["tilt_joint_velocity_range"] = (0.0, 0.0)
+  params["data_pose_range"] = {}
+  params["data_velocity_range"] = {}
+  params["data_joint_position_range"] = (0.0, 0.0)
+  params["data_joint_velocity_range"] = (0.0, 0.0)
 
-  motion_files = params.get("motion_files", ())
-  if not motion_files:
-    raise RuntimeError(
-      "reset_base.motion_files is empty. Please set fall data csv paths first."
-    )
+  motion_files = _resolve_motion_files(params)
+  params["motion_files"] = motion_files
 
   env_ids = torch.tensor([0], dtype=torch.int64, device=env.device)
   reset_root_state_mixed(env=env, env_ids=env_ids, **params)
@@ -73,12 +89,11 @@ def _print_link_base_omega_xy(env: ManagerBasedRlEnv) -> None:
   omega_xy = torch.linalg.vector_norm(
     asset.data.root_link_ang_vel_w[0, :2], dim=0
   ).item()
-  wx, wy = asset.data.root_link_ang_vel_w[0, 0].item(), asset.data.root_link_ang_vel_w[
-    0, 1
-  ].item()
-  print(
-    f"[data-reset] LINK_BASE omega_xy={omega_xy:.6f} (wx={wx:.6f}, wy={wy:.6f})"
+  wx, wy = (
+    asset.data.root_link_ang_vel_w[0, 0].item(),
+    asset.data.root_link_ang_vel_w[0, 1].item(),
   )
+  print(f"[data-reset] LINK_BASE omega_xy={omega_xy:.6f} (wx={wx:.6f}, wy={wy:.6f})")
 
 
 def _sample_one_raw_data_state(env: ManagerBasedRlEnv) -> None:
@@ -86,11 +101,7 @@ def _sample_one_raw_data_state(env: ManagerBasedRlEnv) -> None:
   if reset_term is None:
     raise RuntimeError("Environment has no reset_base event.")
   params = dict(reset_term.params)
-  motion_files = params.get("motion_files", ())
-  if not motion_files:
-    raise RuntimeError(
-      "reset_base.motion_files is empty. Please set fall data csv paths first."
-    )
+  motion_files = _resolve_motion_files(params)
 
   asset = env.scene["robot"]
   root_ids, _ = asset.find_bodies((params["data_root_body_name"],), preserve_order=True)
@@ -104,6 +115,8 @@ def _sample_one_raw_data_state(env: ManagerBasedRlEnv) -> None:
     root_body_idx=root_body_idx,
     device=env.device,
     expected_num_joints=asset.num_joints,
+    min_root_height=params.get("data_min_root_height"),
+    max_abs_joint_velocity=params.get("data_max_abs_joint_velocity"),
   )
   num_states = motion_pool["root_state"].shape[0]
   if num_states == 0:

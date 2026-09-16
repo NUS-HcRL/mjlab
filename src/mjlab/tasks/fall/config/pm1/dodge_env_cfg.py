@@ -18,7 +18,7 @@ from .rl_cfg import pm1_falling_amp_runner_cfg
 
 def pm1_flat_falling_dodge_env_cfg(
   play: bool = False,
-  use_data_reset: bool = True,
+  use_data_reset: bool = False,
   use_data_reset_obs_history: bool = False,
 ) -> ManagerBasedRlEnvCfg:
   """Extend the base fall configuration without changing any existing terms."""

@@ -64,9 +64,14 @@ class RewardManager(ManagerBase):
       env_ids = slice(None)
     extras = {}
     for key in self._episode_sums.keys():
-      episodic_sum_avg = torch.mean(self._episode_sums[key][env_ids])
-      extras["Episode_Reward/" + key] = (
-        episodic_sum_avg / self._env.max_episode_length_s
+      # Report reward rate over the time that each episode actually ran. Using
+      # max_episode_length_s here systematically hid costs from early-terminated
+      # episodes and biased comparisons between runs with different termination rates.
+      episode_duration = (
+        self._env.episode_length_buf[env_ids].float().clamp_min(1.0) * self._env.step_dt
+      )
+      extras["Episode_Reward/" + key] = torch.mean(
+        self._episode_sums[key][env_ids] / episode_duration
       )
       self._episode_sums[key][env_ids] = 0.0
     for term_cfg in self._class_term_cfgs:

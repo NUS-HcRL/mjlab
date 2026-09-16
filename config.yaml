@@ -551,7 +551,7 @@ env_cfg:
                             - -0.4
                             - 0.4
                     motion_files:
-                        - data/amp_pm1_fall/policy_switch_walking_combined.csv
+                        - data/fall_with_obs_history/policy_switch_walking_combined.csv
                     tilt_joint_position_range:
                         - -0.1
                         - 0.1

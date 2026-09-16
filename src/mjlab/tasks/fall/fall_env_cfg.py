@@ -4,17 +4,16 @@ This module provides a factory function to create a base fall task config.
 Robot-specific configurations call the factory and customize as needed.
 """
 
-import math
-
 from mjlab.asset_zoo.robots.engineai_pm01.pm01_8 import (
   EFFORT_LIMIT_Q25,
   PM_Q25_ACTUATOR_INDICES,
 )
 from mjlab.envs import ManagerBasedRlEnvCfg
+from mjlab.envs.amp import AMPCfg
 from mjlab.envs.mdp.actions import JointPositionActionCfg
 from mjlab.managers.manager_term_config import (
-  CurriculumTermCfg,
   ActionTermCfg,
+  CurriculumTermCfg,
   EventTermCfg,
   ObservationGroupCfg,
   ObservationTermCfg,
@@ -24,18 +23,14 @@ from mjlab.managers.manager_term_config import (
 from mjlab.managers.scene_entity_config import SceneEntityCfg
 from mjlab.scene import SceneCfg
 from mjlab.sim import MujocoCfg, SimulationCfg
-from mjlab.envs.amp import AMPCfg
 from mjlab.tasks.fall import mdp
 from mjlab.tasks.fall.mdp.curriculums import (
   q25_effort_limit_curriculum,
   reset_force_pulse_curriculum,
-  reset_initialization_curriculum,
-  reset_push_curriculum,
   task_reward_weight_curriculum,
 )
 from mjlab.tasks.fall.mdp.events import (
   apply_external_force_torque_axiswise_pulse,
-  push_by_setting_velocity_preserve_data,
   randomize_gravity,
 )
 from mjlab.tasks.fall.mdp.terminations import nonfinite_state
@@ -86,7 +81,7 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
       func=mdp.last_action,
       history_length=5,
       flatten_history_dim=True,
-      ),
+    ),
   }
 
   # Critic: same as actor plus privileged base (shorter history for speed).
@@ -141,79 +136,78 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
       func=mdp.reset_root_state_mixed,
       mode="reset",
       params={
-        "tilt_pose_range": {
-          "x": (-1.2, 1.2),
-          "y": (-1.2, 1.2),
-          "z": (0, 0.08),
-          "roll": (-0.1, 0.1),
-          "pitch": (-0.1, 0.1),
-          "yaw": (-3.14, 3.14),
+        # Robot-specific configs provide complete trajectory states: time,
+        # root pose/velocity, and joint position/velocity. Fresh episodes
+        # sample files uniformly, then frames uniformly within a file.
+        "stable_state_files": (),
+        # Share of fresh non-data resets using the exact initial standing pose
+        # and zero velocities. The remaining fresh samples come from recordings.
+        "stable_standing_probability": 0.05,
+        "stable_pose_range": {
+          "x": (-0.05, 0.05),
+          "y": (-0.05, 0.05),
+          # Only lift the source state; never introduce ground penetration.
+          "z": (0.00, 0.02),
+          "roll": (0.0, 0.0),
+          "pitch": (0.0, 0.0),
+          "yaw": (-0.05, 0.05),
         },
-        "tilt_velocity_range": {},
-        "tilt_joint_position_range": (-0.25, 0.25),
-        "tilt_joint_velocity_range": (-0.1, 0.1),
-        "data_probability": 0.15,
+        # Preserve the recorded position/velocity pair exactly. The external
+        # force pulse remains the intended fall-triggering perturbation.
+        "stable_joint_position_std": 0.0,
+        "stable_min_root_height": 0.60,
+        "stable_max_root_linear_speed": 3.0,
+        "stable_max_root_angular_speed": 10.0,
+        "stable_max_abs_joint_velocity": 40.0,
+        # Trajectory data reset remains available as an explicit opt-in, but
+        # stable-state reset is the default training distribution.
+        "data_probability": 0.0,
         "motion_files": (),
         "data_root_body_name": "LINK_BASE",
         "data_pose_range": {
-          "x": (-1, 1),
-          "y": (-1, 1),
-          "z": (-0.03, 0.3),
-          "roll": (-0.2, 0.2),
-          "pitch": (-0.2, 0.2),
-          "yaw": (-3.14, 3.14),
+          "x": (-0.05, 0.05),
+          "y": (-0.05, 0.05),
+          "z": (0.00, 0.02),
+          "roll": (0.0, 0.0),
+          "pitch": (0.0, 0.0),
+          "yaw": (-0.05, 0.05),
         },
-        "data_velocity_range": {
-          "x": (-1, 1),
-          "y": (-1, 1),
-          "z": (-0.4, 0.4),
-          "roll": (-0.6, 0.6),
-          "pitch": (-0.6, 0.6),
-          "yaw": (-0.8, 0.8),
-        },
-        "data_joint_position_range": (-0.25, 0.25),
-        "data_joint_velocity_range": (-0.2, 0.2),
+        "data_velocity_range": {},
+        "data_joint_position_range": (-0.03, 0.03),
+        "data_joint_velocity_range": (0.0, 0.0),
+        "data_min_root_height": 0.25,
+        "data_max_abs_joint_velocity": 40.0,
+        "data_low_clearance_height": 0.35,
+        # Keep fresh stable-state sampling as the exploration floor while
+        # replaying neighborhoods of safety-critical terminated episodes.
+        "adaptive_sampling": True,
+        "adaptive_buffer_size": 4096,
+        "adaptive_replay_probability": 0.0,
+        "adaptive_min_failures": 128,
+        "adaptive_neighbor_scale": 0.15,
+        # Tracking-style priority mixture: successful replays gradually lose
+        # priority, while the uniform component prevents mode collapse.
+        "adaptive_uniform_ratio": 0.2,
+        "adaptive_priority_alpha": 0.05,
+        "adaptive_failure_term_names": ("forbidden_body_contact_force",),
       },
     ),
-    # Apply an extra reset push only to non-data initializations so motion-derived
-    # root velocities remain unchanged.
-    "push_at_reset": EventTermCfg(
-      func=push_by_setting_velocity_preserve_data,
-      mode="reset",
-      params={
-        "velocity_range": {
-          "x": (-1.0, 1.0),
-          "y": (-1.0, 1.0),
-          "z": (-0.3, 0.3),
-          "roll": (-0.5, 0.5),
-          "pitch": (-0.5, 0.5),
-          "yaw": (-0.5, 0.5),
-        },
-        "preserve_data_reset_states": True,
-      },
-    ),
-    # Single pulse event: detects just-reset envs, applies force pulse, and
-    # decrements/clears pulses every step.
+    # Apply the fall-triggering pulse after the complete-state reset. The pulse
+    # manager runs every step so it can hold and then clear the external wrench.
     "push_force_pulse": EventTermCfg(
       func=apply_external_force_torque_axiswise_pulse,
       mode="interval",
       interval_range_s=(0.0, 0.0),
       params={
-        # World-frame external force range per axis.
-        "force_axis_range": {
-          # "x": (-200.0, 200.0),
-          # "y": (-200.0, 200.0),
-          # "z": (-30.0, -30.0),
-        },
-        # World-frame external torque range per axis.
-        "torque_axis_range": {
-          # "roll": (-12.0, 12.0),
-          # "pitch": (-20.0, -5.0),
-          # "yaw": (-10.0, 10.0),
-        },
+        "force_axis_range": {},
+        "torque_axis_range": {},
         "duration_steps_range": (0, 1),
-        # Enforce cooldown to avoid too many consecutive high-impact episodes.
         "cooldown_steps": 200,
+        # Optional trajectory-data resets use their labeled direction and do
+        # not enter random-reset disturbance replay.
+        "data_direction_force_magnitude_range": (30.0, 80.0),
+        "data_direction_force_probability": 0.5,
+        "data_direction_duration_steps_range": (2, 6),
         "preserve_data_reset_states": True,
         "asset_cfg": SceneEntityCfg("robot"),
       },
@@ -299,11 +293,16 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
           "LINK_SHOULDER_YAW_L",
           "LINK_SHOULDER_YAW_R",
         ),
-        high_weight=100.0,
-        medium_weight=60.0,
+        high_weight=500.0,
+        medium_weight=50.0,
         low_weight=0.5,
-        alpha=0.5,
-        squash_scale=0.02,
+        sum_weight=0.25,
+        # Per-robot force references are injected by the robot-specific config.
+        squash_scale=0.0,
+        max_penalty=2.0,
+        body_force_scales={},
+        # All bodies without an explicit per-robot reference use this scale.
+        default_force_scale=3000.0,
         tracked_body_names=(
           "LINK_HEAD_YAW",
           "LINK_TORSO_YAW",
@@ -313,18 +312,25 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
           "LINK_SHOULDER_ROLL_R",
         ),
       ),
-      weight=0.012, # 0.01
+      weight=10.0,
     ),
     "forbidden_contact_force_penalty": RewardTermCfg(
       func=mdp.ForbiddenContactForcePenalty(
         sensor_name="body_contact_force",
-        body_force_thresholds={},  # Set per-robot with termination thresholds.
-        start_ratio=0.4,
+        body_force_thresholds={},  # Set per-robot as fixed dense-reward targets.
+        start_ratio=0.75,
         sharpness=12.0,
         alpha=0.6,
         squash_scale=2.0,
       ),
-      weight=1.0,
+      weight=3.0,
+    ),
+    "forbidden_contact_termination": RewardTermCfg(
+      func=mdp.termination_event,
+      weight=-2.0,
+      params={
+        "termination_term_name": "forbidden_body_contact_force",
+      },
     ),
     # "control_descent_speed": RewardTermCfg(
     #   func=mdp.control_descent_speed,
@@ -383,15 +389,17 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
           "LINK_ELBOW_END_L",
           "LINK_ELBOW_END_R",
         ),
-        min_delay_s=0.2,
+        min_delay_s=0.15,
         max_delay_s=0.6,
         lower_first_bonus=0.5,
         timely_upper_bonus=1.0,
         early_upper_penalty=4.0,
         late_upper_penalty=0.2,
-        early_upper_force_scale=0.0,
+        early_upper_force_scale=0.002,
+        max_upper_force=1000.0,
+        min_lower_contact_force=20.0,
       ),
-      weight=0.05,
+      weight=0.10,
     ),
     # "motor_overcurrent": RewardTermCfg(
     #   func=mdp.motor_overcurrent_penalty,
@@ -414,6 +422,16 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
       func=nonfinite_state,
       params={"asset_cfg": SceneEntityCfg("robot")},
     ),
+    "invalid_physics_state": TerminationTermCfg(
+      func=mdp.invalid_physics_state,
+      params={
+        "sensor_name": "body_contact_force",
+        "asset_cfg": SceneEntityCfg("robot"),
+        "max_body_linear_speed": 20.0,
+        "max_joint_speed": 100.0,
+        "max_contact_force": 20_000.0,
+      },
+    ),
     "forbidden_body_contact_force": TerminationTermCfg(
       func=mdp.BadBodyContactForce(),
       params={
@@ -434,99 +452,9 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
       params={
         "stages": [
           {"step": 0, "scale": 1.0},
-          {"step": 25_000 * 32, "scale": 1.4},
         ],
       },
     ),
-    "reset_init": CurriculumTermCfg(
-      func=reset_initialization_curriculum,
-      params={
-        "event_name": "reset_base",
-        "init_stages": [
-          {
-            "step": 0,
-            "data_probability": 0.05,
-            "tilt_pose_range": {
-              "x": (-0.4, 0.4),
-              "y": (-0.4, 0.4),
-              "z": (0.00, 0.06),
-              "roll": (-0.1, 0.1),
-              "pitch": (-0.1, 0.1),
-              "yaw": (-3.14, 3.14),
-            },
-            "tilt_velocity_range": {},
-            "tilt_joint_position_range": (-0.1, 0.1),
-            "tilt_joint_velocity_range": (-0.03, 0.03),
-          },
-          {
-            "step": 6_000 * 32,
-            "data_probability": 0.15,
-            "tilt_pose_range": {
-              "x": (-0.6, 0.6),
-              "y": (-0.6, 0.6),
-              "z": (0.00, 0.1),
-              "roll": (-0.15, 0.15),
-              "pitch": (-0.15, 0.15),
-              "yaw": (-3.14, 3.14),
-            },
-            "tilt_velocity_range": {},
-            "tilt_joint_position_range": (-0.15, 0.15),
-            "tilt_joint_velocity_range": (-0.05, 0.05),
-          },
-          {
-            "step": 16_000 * 32,
-            "data_probability": 0.30,
-            "tilt_pose_range": {
-              "x": (-1, 1),
-              "y": (-1, 1),
-              "z": (0.00, 0.1),
-              "roll": (-0.2, 0.2),
-              "pitch": (-0.2, 0.2),
-              "yaw": (-3.14, 3.14),
-            },
-            "tilt_velocity_range": {},
-            "tilt_joint_position_range": (-0.25, 0.25),
-            "tilt_joint_velocity_range": (-0.08, 0.08),
-          },
-        ],
-      },
-    ),
-    # "reset_push": CurriculumTermCfg(
-    #   func=reset_push_curriculum,
-    #   params={
-    #     "event_name": "push_at_reset",
-    #     # env.common_step_counter counts env steps, not iterations.
-    #     "push_stages": [
-    #       {
-    #         "step": 0,
-    #         "x": (-1.0, 1.0),
-    #         "y": (-1.0, 1.0),
-    #         "z": (-0.1, 0.1),
-    #         "roll": (-0.2, 0.2),
-    #         "pitch": (-0.2, 0.2),
-    #         "yaw": (-0.3, 0.3),
-    #       },
-    #       {
-    #         "step": 8_000 * 32,
-    #         "x": (-3.0, 3.0),
-    #         "y": (-3.0, 3.0),
-    #         "z": (-0.15, 0.15),
-    #         "roll": (-0.5, 0.5),
-    #         "pitch": (-0.5, 0.5),
-    #         "yaw": (-0.4, 0.4),
-    #       },
-    #       {
-    #         "step": 15000 * 32,
-    #         "x": (-5.0, 5.0),
-    #         "y": (-5.0, 5.0),
-    #         "z": (-0.2, 0.2),
-    #         "roll": (-1, 1),
-    #         "pitch": (-1, 1),
-    #         "yaw": (-0.5, 0.5),
-    #       },
-    #     ],
-    #   },
-    # ),
     "reset_force_pulse": CurriculumTermCfg(
       func=reset_force_pulse_curriculum,
       params={
@@ -561,7 +489,7 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
           },
           {
             "step": 15_000 * 32,
-            "duration_steps_range": (5, 30),
+            "duration_steps_range": (5, 25),
             "force_axis_range": {
               "x": (-300.0, 300.0),
               "y": (-300.0, 300.0),
@@ -629,7 +557,7 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
       # Keep root z for fall-state awareness, but drop root x/y and root 6D
       # orientation so the discriminator cannot separate expert/policy too
       # easily using obvious global pose shortcuts.
-      num_disc_obs_steps=2,  # 52-dim per step with current settings
+      num_disc_obs_steps=2,
       asset_name="robot",
       root_body_name="LINK_BASE",
       motion_file=None,
@@ -639,6 +567,9 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
       include_root_rot=False,
       include_root_vel=True,
       include_projected_gravity=False,
+      # Sparse per-direction demonstrations made the categorical label an easy
+      # discriminator shortcut, so keep the AMP observation unconditional.
+      include_fall_direction_obs=False,
       disc_body_pos_b_link_names=(
         # "LINK_ANKLE_ROLL_L",
         # "LINK_ANKLE_ROLL_R",
