@@ -1,7 +1,7 @@
 """Episode-fixed ground regions for the fall task's optional dodge extension.
 
 Regions are virtual: they do not add collision geometry or change the robot.
-Only actor/critic observations and a ground-contact cost depend on them.
+Actor/critic observations, contact costs and clearance shaping depend on them.
 """
 
 from __future__ import annotations
@@ -35,6 +35,22 @@ def region_contact_mask(
   return active[:, None] & (found > 0) & (distance_sq <= radius[:, None].square())
 
 
+def predict_landing(
+  pos: torch.Tensor,
+  vel: torch.Tensor,
+  ground_z: torch.Tensor,
+  height: float = 0.10,
+  gravity: float = 9.81,
+  max_time: float = 0.65,
+) -> tuple[torch.Tensor, torch.Tensor]:
+  """Ballistic link projection; grounded links use their current footprint."""
+  h = (pos[..., 2] - ground_z[:, None] - height).clamp_min(0.0)
+  vz = vel[..., 2]
+  time = (vz + torch.sqrt(vz.square() + 2 * gravity * h)) / gravity
+  time = torch.where(h > 0, time.clamp(0, max_time), 0.0)
+  return pos[..., :2] + vel[..., :2] * time[..., None], time
+
+
 class DodgeRegionCommand(CommandTerm):
   """Activate one predicted landing region shortly after reset, then keep it fixed."""
 
@@ -57,6 +73,14 @@ class DodgeRegionCommand(CommandTerm):
       self.num_envs, dtype=torch.long, device=self.device
     )
     self._motion_start_pos_w = torch.zeros_like(self.center_w)
+    # Save the pre-action potential geometry when a region becomes visible.
+    self.activation_landing_xy = torch.zeros_like(self.robot.data.body_link_pos_w[..., :2])
+    self.activation_valid = torch.zeros_like(self.active)
+    self._landing_body_ids, matched = self.robot.find_bodies(
+      cfg.landing_body_names, preserve_order=True
+    )
+    if len(matched) != len(cfg.landing_body_names):
+      raise ValueError("Dodge landing bodies must all exist on the robot")
 
   @property
   def command(self) -> torch.Tensor:
@@ -108,13 +132,19 @@ class DodgeRegionCommand(CommandTerm):
 
   def compute(self, dt: float) -> None:
     # The force-pulse interval event starts after this method on the reset step.
-    # Skip episode_length==0, then observe real motion for a few completed control
-    # steps before estimating a landing point and making the region visible.
+    # A positive pulse counter means the just-completed physics step was forced.
+    # Only count complete unforced steps; interval events clear the pulse later.
     pending_ids = torch.nonzero(
       self.pending & (self._env.episode_length_buf > 0), as_tuple=False
     ).squeeze(-1)
     if pending_ids.numel() == 0:
       return
+    pulse_left = getattr(self._env, "_fall_force_pulse_steps_left", None)
+    if pulse_left is not None:
+      forced = pending_ids[pulse_left[pending_ids] > 0]
+      self._motion_steps[forced] = 0
+      self._motion_start_pos_w[forced] = self.robot.data.root_link_pos_w[forced]
+      pending_ids = pending_ids[pulse_left[pending_ids] <= 0]
     self._motion_steps[pending_ids] += 1
     ready = pending_ids[
       self._motion_steps[pending_ids] >= self.cfg.motion_observation_steps
@@ -133,6 +163,7 @@ class DodgeRegionCommand(CommandTerm):
     cfg = self.cfg
     n = env_ids.numel()
     self.active[env_ids] = False
+    self.activation_valid[env_ids] = False
     self.center_w[env_ids] = 0
     self.radius[env_ids] = 0
     self.requested[env_ids] = torch.rand(n, device=self.device) < cfg.probability
@@ -145,7 +176,7 @@ class DodgeRegionCommand(CommandTerm):
     self._motion_start_pos_w[env_ids] = root_pos
 
   def _activate_regions(self, env_ids: torch.Tensor, dt: float) -> None:
-    """Estimate the future root landing projection from observed post-pulse motion."""
+    """Place near a descending limb in the confirmed tipping direction."""
     cfg = self.cfg
     data = self.robot.data
     root_pos = data.data.qpos[env_ids][:, self.robot.indexing.free_joint_q_adr[:3]]
@@ -163,38 +194,41 @@ class DodgeRegionCommand(CommandTerm):
     )
     ground_z = self._env.scene.env_origins[env_ids, 2]
 
-    # Ballistic root projection until it reaches prediction_height above ground.
-    # Clamps bound model error from contacts, control action, and non-ballistic motion.
-    height = (root_pos[:, 2] - ground_z - cfg.prediction_height).clamp_min(0)
-    vz = velocity[:, 2]
-    flight_time = (
-      vz + torch.sqrt(vz.square() + 2.0 * cfg.gravity_magnitude * height)
-    ) / cfg.gravity_magnitude
-    flight_time = flight_time.clamp(*cfg.flight_time_range)
-    displacement = velocity[:, :2] * flight_time[:, None]
-
-    # When the first few frames have little translation, use root heading as a
-    # deterministic fallback so the region is not placed under the standing feet.
-    displacement_norm = torch.linalg.vector_norm(
-      displacement, dim=-1, keepdim=True
+    up = torch.zeros_like(root_pos)
+    up[:, 2] = 1.0
+    up = quat_apply(root_quat, up)
+    omega = data.root_link_ang_vel_w[env_ids]
+    tipping = torch.linalg.cross(omega, up, dim=-1)[:, :2]
+    direction = up[:, :2] + cfg.direction_lookahead * tipping
+    direction += cfg.direction_lookahead * velocity[:, :2]
+    direction /= torch.linalg.vector_norm(
+      direction, dim=-1, keepdim=True
+    ).clamp_min(1e-6)
+    confirmed = (
+      (torch.linalg.vector_norm(up[:, :2], dim=-1) >= cfg.min_tilt)
+      | (torch.linalg.vector_norm(tipping, dim=-1) >= cfg.min_tipping_speed)
     )
-    root_forward = torch.zeros(len(env_ids), 3, device=self.device)
-    root_forward[:, 0] = 1.0
-    # Applying yaw only keeps this fallback horizontal even when the robot tilts.
-    root_forward_w = quat_apply(yaw_quat(root_quat), root_forward)
-    direction = torch.where(
-      displacement_norm > 1e-5,
-      displacement / displacement_norm.clamp_min(1e-6),
-      root_forward_w[:, :2],
+    pos = data.body_link_pos_w[env_ids][:, self._landing_body_ids]
+    vel = data.body_link_lin_vel_w[env_ids][:, self._landing_body_ids]
+    landing, flight_time = predict_landing(
+      pos, vel, ground_z, cfg.prediction_height,
+      cfg.gravity_magnitude, cfg.max_flight_time,
     )
-    base_landing_distance = displacement_norm.squeeze(-1).clamp(
-      *cfg.landing_distance_range
+    forward = ((landing - root_pos[:, None, :2]) * direction[:, None]).sum(-1)
+    eligible = (
+      (vel[..., 2] < -cfg.min_downward_speed)
+      & (flight_time >= cfg.min_reaction_time)
+      & (pos[..., 2] - ground_z[:, None] > cfg.low_body_height)
+      & (forward > 0)
+      & torch.isfinite(landing).all(-1)
+      & confirmed[:, None]
+      & ((root_pos[:, 2] - ground_z) >= cfg.min_root_height)[:, None]
     )
-    # The root projection tends to put the region beneath the torso. Lead it
-    # farther along the fall direction so the target is closer to the expected
-    # hand/forearm landing area and can be avoided with a small lateral motion.
-    target_distance = base_landing_distance + cfg.landing_lead_distance
-    predicted_xy = root_pos[:, :2] + direction * target_distance[:, None]
+    # Sample among plausible threatened limbs, not their average (which can lie
+    # between both arms where no body will land).
+    scores = torch.rand_like(flight_time).masked_fill(~eligible, -1)
+    chosen_body = scores.argmax(-1)
+    predicted_xy = landing[torch.arange(len(env_ids), device=self.device), chosen_body]
 
     n = len(env_ids)
     random = torch.rand(n, cfg.placement_attempts, 3, device=self.device)
@@ -210,7 +244,11 @@ class DodgeRegionCommand(CommandTerm):
     low_body = (body_pos[..., 2] - ground_z[:, None]) < cfg.low_body_height
     clearance_sq = (candidates[:, :, None] - body_pos[:, None, :, :2]).square().sum(-1)
     intersects = clearance_sq <= (radii[..., None] + cfg.initial_body_clearance).square()
-    valid = ~(intersects & low_body[:, None]).any(dim=-1)
+    valid = (
+      ~(intersects & low_body[:, None]).any(dim=-1)
+      & eligible.any(-1)[:, None]
+      & torch.isfinite(candidates).all(-1)
+    )
     choice = valid.long().argmax(dim=-1)
     rows = torch.arange(n, device=self.device)
     active = valid.any(dim=-1)
@@ -218,7 +256,17 @@ class DodgeRegionCommand(CommandTerm):
     self.active[env_ids] = active
     self.center_w[env_ids] = torch.where(active[:, None], centers, 0.0)
     self.radius[env_ids] = torch.where(active, radii[rows, choice], 0.0)
-    self.pending[env_ids] = False
+    activated = env_ids[active]
+    self.activation_landing_xy[activated], _ = predict_landing(
+      data.body_link_pos_w[activated], data.body_link_lin_vel_w[activated],
+      self._env.scene.env_origins[activated, 2],
+    )
+    self.activation_valid[activated] = True
+    # Retry ambiguous early states, but never reveal a region late in a fall.
+    self.pending[env_ids] = (
+      ~active & (elapsed < cfg.max_observation_time)
+      & ((root_pos[:, 2] - ground_z) >= cfg.min_root_height)
+    )
 
   def record_contacts(self, hit: torch.Tensor, overflow: torch.Tensor) -> None:
     self._steps += 1
@@ -259,12 +307,21 @@ class DodgeRegionCommandCfg(CommandTermCfg):
   reference_frame: Literal["yaw", "full"] = "yaw"
   motion_observation_steps: int = 3
   radius_range: tuple[float, float] = (0.08, 0.14)
-  prediction_height: float = 0.35
+  landing_body_names: tuple[str, ...] = (
+    "LINK_ELBOW_PITCH_L", "LINK_ELBOW_END_L",
+    "LINK_ELBOW_PITCH_R", "LINK_ELBOW_END_R",
+    "LINK_KNEE_PITCH_L", "LINK_KNEE_PITCH_R",
+  )
+  prediction_height: float = 0.10
   gravity_magnitude: float = 9.81
   current_velocity_mix: float = 0.5
-  flight_time_range: tuple[float, float] = (0.10, 0.80)
-  landing_distance_range: tuple[float, float] = (0.35, 0.90)
-  landing_lead_distance: float = 0.35
+  min_reaction_time: float = 0.12
+  max_flight_time: float = 0.65
+  max_observation_time: float = 0.8
+  direction_lookahead: float = 0.15
+  min_tilt: float = 0.10
+  min_tipping_speed: float = 0.30
+  min_downward_speed: float = 0.05
   placement_jitter: float = 0.12
   min_root_height: float = 0.45
   low_body_height: float = 0.15
@@ -278,16 +335,15 @@ class DodgeRegionCommandCfg(CommandTermCfg):
       raise ValueError("reference_frame must be 'yaw' or 'full'")
     if self.motion_observation_steps < 1:
       raise ValueError("motion_observation_steps must be positive")
-    for name in (
-      "radius_range", "flight_time_range", "landing_distance_range"
-    ):
+    for name in ("radius_range",):
       lo, hi = getattr(self, name)
       if not (math.isfinite(lo) and math.isfinite(hi) and 0 < lo <= hi):
         raise ValueError(f"{name} must contain ordered positive finite values")
     for name in (
       "prediction_height",
       "gravity_magnitude",
-      "landing_lead_distance",
+      "min_reaction_time", "max_flight_time", "max_observation_time",
+      "direction_lookahead", "min_tilt", "min_tipping_speed", "min_downward_speed",
       "placement_jitter",
       "min_root_height",
       "low_body_height",
@@ -298,6 +354,10 @@ class DodgeRegionCommandCfg(CommandTermCfg):
         raise ValueError(f"{name} must be finite and nonnegative")
     if self.gravity_magnitude <= 0:
       raise ValueError("gravity_magnitude must be positive")
+    if not 0 < self.min_reaction_time < self.max_flight_time:
+      raise ValueError("Reaction time must be positive and below max flight time")
+    if self.max_observation_time <= 0 or not self.landing_body_names:
+      raise ValueError("Observation time and landing bodies must be nonempty")
     if not 0 <= self.current_velocity_mix <= 1:
       raise ValueError("current_velocity_mix must be in [0, 1]")
     if self.placement_attempts < 1:
@@ -474,3 +534,93 @@ class DodgePredictedLandingRisk:
     body_risk = torch.where(finite, spatial_risk * downward_gate, 0.0)
     risk = body_risk.max(dim=-1).values
     return risk * region.active.float()
+
+
+class DodgeLandingClearanceReward:
+  """Discounted potential shaping, with no downward-speed reward gate.
+
+  Phi is in [-1, 0]; approaching a safe footprint increases Phi. Do not clip
+  negative differences: that would let oscillations repeatedly earn reward.
+  Activation snapshots initialize the baseline before the first dodge action,
+  without paying for the region appearing. True terminals use zero potential;
+  time limits retain Phi
+  because PPO bootstraps them. RewardManager's dt scaling is canceled here.
+  """
+
+  def __init__(
+    self,
+    body_names: tuple[str, ...],
+    command_name: str = "dodge",
+    asset_name: str = "robot",
+    gamma: float = 0.99,
+    safety_margin: float = 0.05,
+    body_margin: float = 0.04,
+    temperature: float = 0.04,
+  ) -> None:
+    if not body_names or not 0 < gamma <= 1:
+      raise ValueError("Body names and a discount in (0, 1] are required")
+    if not all(math.isfinite(v) and v >= 0 for v in (safety_margin, body_margin)):
+      raise ValueError("Margins must be finite and nonnegative")
+    if not math.isfinite(temperature) or temperature <= 0:
+      raise ValueError("Temperature must be finite and positive")
+    self.body_names = body_names
+    self.command_name = command_name
+    self.asset_name = asset_name
+    self.gamma = gamma
+    self.safety_margin = safety_margin
+    self.body_margin = body_margin
+    self.temperature = temperature
+    self._body_ids: list[int] | None = None
+    self._previous: torch.Tensor | None = None
+    self._initialized: torch.Tensor | None = None
+
+  def reset(self, env_ids: torch.Tensor | slice | None = None) -> None:
+    if self._initialized is not None:
+      self._initialized[slice(None) if env_ids is None else env_ids] = False
+
+  def _potential(
+    self, landing: torch.Tensor, region: DodgeRegionCommand
+  ) -> torch.Tensor:
+    distance = torch.linalg.vector_norm(
+      landing - region.center_w[:, None, :2], dim=-1
+    )
+    clearance = distance - region.radius[:, None] - self.body_margin
+    return -torch.sigmoid(
+      (self.safety_margin - clearance) / self.temperature
+    ).amax(-1)
+
+  def __call__(self, env: ManagerBasedRlEnv) -> torch.Tensor:
+    region = cast(DodgeRegionCommand, env.command_manager.get_term(self.command_name))
+    asset = cast(Entity, env.scene[self.asset_name])
+    if self._body_ids is None:
+      self._body_ids, matched = asset.find_bodies(self.body_names, preserve_order=True)
+      if len(matched) != len(self.body_names):
+        raise ValueError("Dodge clearance bodies must all exist on the robot")
+    pos = asset.data.body_link_pos_w[:, self._body_ids]
+    vel = asset.data.body_link_lin_vel_w[:, self._body_ids]
+    landing, _ = predict_landing(pos, vel, env.scene.env_origins[:, 2])
+    phi = self._potential(landing, region)
+    finite = (
+      torch.isfinite(pos).all(dim=(1, 2))
+      & torch.isfinite(vel).all(dim=(1, 2))
+      & torch.isfinite(phi)
+    )
+    if self._previous is None:
+      self._previous = torch.zeros(env.num_envs, device=env.device)
+      self._initialized = torch.zeros(env.num_envs, dtype=torch.bool, device=env.device)
+    assert self._initialized is not None
+    fresh = region.active & ~self._initialized & region.activation_valid
+    initial = self._potential(region.activation_landing_xy[:, self._body_ids], region)
+    initial = torch.nan_to_num(initial, nan=0.0, posinf=0.0, neginf=-1.0)
+    self._previous.copy_(torch.where(fresh, initial, self._previous))
+    # Numerical failures must not leave NaNs in persistent reward state.
+    phi = torch.where(finite & region.active, phi, 0.0)
+    phi = torch.where(env.termination_manager.terminated, 0.0, phi)
+    reward = torch.where(
+      region.active & (self._initialized | fresh),
+      self.gamma * phi - self._previous,
+      0.0,
+    )
+    self._previous.copy_(phi)
+    self._initialized.copy_(region.active & finite)
+    return reward / env.step_dt

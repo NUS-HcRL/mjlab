@@ -1,146 +1,115 @@
-# PM1 fall with ground-region avoidance
+# PM1 ground-region avoidance
 
-The `Mjlab-Falling-Flat-PM1-AMP-Dodge` task extends the original fall factory. It
-adds a virtual ground region, a five-dimensional actor/critic observation with
-three-frame history, a separate contact sensor, and two negative rewards. Original robot physics, actions,
-fall rewards, termination thresholds, curricula, AMP observations/demonstrations,
-and PPO settings are unchanged. The original fall task IDs remain available.
+The task `Mjlab-Falling-Flat-PM1-AMP-Dodge` adds virtual ground regions, 15
+observation dimensions (five values with three-frame history), contact costs and
+landing-clearance shaping. Original fall task factories remain unchanged.
 
-This is a normal policy-training task, not a frozen-policy/residual controller.
-Old fall checkpoint migration is **not implemented**: its smaller actor/critic
-input layers and observation normalizers cannot simply be resumed into Dodge.
-Use newly trained Dodge checkpoints for subsequent resumes. Unchanged settings
-do not guarantee unchanged fall performance after training.
+Dodge overrides impact cost to `2.0` and action-rate cost to `-0.15`. It removes
+`forbidden_body_contact_force` termination and its event penalty, but retains
+nonfinite/invalid-physics guards and time limits. There are no hard head/torso/elbow
+impact limits in Dodge; a soft reward cannot guarantee safe impacts. The broad
+invalid-physics guard still rejects extreme forces/speeds. Region request
+probability stays at 0.5, AMP mix clip at (0.02, 0.25), and KL early stopping is
+disabled. The two extra dodge reference clips remain included.
 
 ## Run
 
-In the project's full training environment (with its AMP dependencies and motion
-files), start a new run:
+In the full project environment:
 
 ```bash
 uv run train Mjlab-Falling-Flat-PM1-AMP-Dodge --env.scene.num-envs 4096
-```
-
-Preview the region and observations without a trained policy:
-
-```bash
 uv run play Mjlab-Falling-Flat-PM1-AMP-Dodge --agent zero --num-envs 16
 ```
 
-The red ring is a debug visualization, supported by both native and Viser viewers.
-It is only visible in environments with an active region. Play retains the same
-20% sampling probability; reset or switch the displayed environment to find one.
-The original fall play behavior, including its long episode and deterministic
-initial push, is retained. Zero actions do not demonstrate learned avoidance.
+The red ring is a debug visualization, not collision geometry. Play requests
+regions with the same probability but retains its original reset/push behavior.
+Zero actions do not demonstrate avoidance. Logs use `pm1_falling_amp_dodge`.
+This is ordinary policy training, not a residual controller. Old fall checkpoint
+migration is not provided.
 
-Logs use experiment name `pm1_falling_amp_dodge`.
+## Placement
 
-## Configuration
-
-Environment/runner factory: `src/mjlab/tasks/fall/config/pm1/dodge_env_cfg.py`.
-Region defaults and implementation: `src/mjlab/tasks/fall/mdp/dodge.py`.
-Sampling settings are exposed under `env.commands.dodge` in the training config.
+Factory: `src/mjlab/tasks/fall/config/pm1/dodge_env_cfg.py`.
+Implementation: `src/mjlab/tasks/fall/mdp/dodge.py`.
 
 | Setting | Default | Meaning |
 | --- | --- | --- |
-| `probability` | `0.5` | Task override: probability of requesting a region at reset |
-| `motion_observation_steps` | `3` | Post-reset frames observed before activation |
-| `reference_frame` | `yaw` | Yaw-only or full-root relative observation frame |
-| `radius_range` | `(0.08, 0.14)` m | Radius of the forbidden ground disc |
-| `prediction_height` | `0.35` m | Root height used as the ballistic landing plane |
-| `flight_time_range` | `(0.10, 0.80)` s | Bounds on estimated flight time |
-| `landing_distance_range` | `(0.35, 0.90)` m | Bounds on predicted displacement |
-| `landing_lead_distance` | `0.35` m | Extra distance from the root projection toward the fall direction |
-| `placement_jitter` | `0.12` m | Candidate jitter around the prediction |
-| `min_root_height` | `0.45` m | Suppress regions for late/low reset states |
-| `initial_body_clearance` | `0.18` m | Clearance outside the disc around low body origins |
-| `placement_attempts` | `8` | Candidate locations before disabling the region |
-| reward `dodge_region_contact.weight` | `-1.0` | Bounded contact cost multiplier |
-| reward `dodge_region_first_contact.weight` | `-0.75` | Fixed once-per-episode penalty for first contact |
-| reward `dodge_predicted_landing_risk.weight` | `-0.5` | Predicted landing risk multiplier |
+| probability | 0.5 (task override) | Request probability |
+| motion_observation_steps | 3 | Complete unforced frames after pulse ends |
+| radius_range | (0.08, 0.14) m | Unchanged disc radius |
+| prediction_height | 0.10 m | Link landing plane |
+| min_reaction_time | 0.12 s | Minimum estimated reaction time |
+| max_flight_time | 0.65 s | Extrapolation cap |
+| max_observation_time | 0.8 s | Unforced observation window |
+| direction_lookahead | 0.15 s | Tilt/rotation/motion direction estimate |
+| min_tilt / min_tipping_speed | 0.10 / 0.30 | Horizontal up-vector magnitude or tipping speed confirming a fall |
+| placement_jitter | 0.12 m | Jitter around selected limb projection |
+| min_root_height | 0.45 m | Reject low/late states |
+| initial_body_clearance | 0.18 m | Clearance beyond radius from low bodies |
+| placement_attempts | 8 | Candidates per eligible observation frame |
 
-These are the current settings after W&B-guided tuning.
-The actual active fraction can be lower than 50%: late fall resets and candidates
-overlapping low bodies are rejected. Existing reset states are never resampled or
-modified to accommodate an obstacle. Placement waits for three completed control
-frames after reset, blends displacement-derived and current root velocity, then
-projects the root ballistically until `prediction_height`. Candidates are jittered
-around a point `0.35 m` beyond that root projection in the fall direction, placing
-the region closer to the expected hand/forearm landing area. The force pulse can
-still be active during this short window;
-waiting for its full configured duration could make the region appear after impact.
-The estimate omits future policy actions, articulation and contacts, so it is not
-a landing guarantee. The low-body clearance check is also an approximation.
+Placement waits for the pulse to end and three complete unforced steps.
+Tilt, world angular velocity and observed/current translation estimate direction;
+upright translation alone does not confirm a fall. A descending elbow pitch/end
+or knee in that direction is selected with sufficient estimated reaction time.
+Candidates lie near that link's ballistic landing point, not a fixed base offset
+or the average between hands. Ambiguous/overlapping candidates are retried within
+the observation window; late/low states are rejected. Active fraction can thus
+be below 50%. Robot reset states are never altered to accommodate a region.
 
-The request is sampled after robot reset/push events. The region remains inactive
-during motion observation, then stays fixed in world coordinates after activation.
-Observations are `[active, relative_x, relative_y, relative_z, radius]` in the
-yaw-only `LINK_BASE` frame by default. All five raw values are zero when inactive.
-The term keeps three frames (15 flattened values) and has no injected noise;
-existing proprioceptive histories/noise are kept.
-AMP discriminator inputs are unchanged. Position comes from simulation state;
-this does not implement a camera, object detector, or visibility/occlusion model.
+Once active, the region is world-fixed for the episode. Observation is
+`[active, relative_x, relative_y, relative_z, radius]` in yaw-only LINK_BASE
+coordinates, with three frames and no added noise. Inactive raw values are zero.
+Existing proprioception stays unchanged. This uses simulation state, not camera
+perception or visibility modeling.
 
-## Contact reward and limitations
+## Rewards
 
-The separate `dodge_ground_contact` sensor includes all `LINK_*` bodies, including
-feet, with four contact slots per body. It exports only `found` and `pos`; the
-original fall sensor continues to supply force. The cost is one if **any valid ground
-contact point** is inside/on the disc, otherwise zero. Multiple contacts do not
-increase this cost. RewardManager multiplies by the negative weight and control
-`dt` (currently `0.02` s), so the duration term contributes `-0.02` per contacting
-step. A separate first-contact term returns `1 / dt` only on the first hit, making
-its configured `-0.75` contribution independent of contact duration.
+- `dodge_region_contact`, weight -1: any valid contact point inside/on the disc
+  incurs a per-step cost (currently -0.02 after dt scaling).
+- `dodge_region_first_contact`, weight -0.75: fixed first-hit cost per episode.
+- `dodge_landing_clearance`, weight +1: replaces the old predicted-risk term.
 
-The predicted landing term ballistically projects the horizontal positions of the
-torso, both knees, and both elbow pitch/end links over `0.05` to `0.45` seconds. It
-applies a smooth risk within a `0.04 m` body margin around the disc and only while
-a tracked link descends. The head is excluded because the existing fall task
-already treats head-ground contact as forbidden. The original AMP EMA mixing still
-applies and may react to the added task penalties.
+Clearance shaping projects torso, knees and elbow pitch/end links up to 0.65 s.
+Grounded links use their current footprint. Head is excluded as requested;
+head force still contributes to impact cost. Clearance is distance to center
+minus radius and a 0.04 m body margin. Potential is
+`Phi = -max(sigmoid((0.05 - clearance) / 0.04))`, bounded in [-1, 0].
+Reward is `(gamma * Phi_next - Phi_previous) / dt`; division cancels
+RewardManager's dt scaling. Gamma matches default PPO (0.99); keep both aligned
+if overriding PPO gamma from the command line.
 
-There is no physical obstacle, new termination, directional pose target, or
-distant-escape bonus. This models avoiding a ground footprint,
-not colliding with an object of nonzero height. The original action-rate reward
-does not impose a hard bound on displacement or guarantee a small dodge.
+There is no downward-speed gate or positive-only clipping: moving away supplies
+positive feedback; moving back costs reward. This is potential shaping, not a
+new terminal success objective; actual contact costs still define avoidance.
+Activation snapshots establish the baseline before the first dodge action,
+without an appearance bonus. Partial reset clears it. True terminals use zero potential; time limits
+retain potential for PPO bootstrapping. Terminal compensation completes the
+telescoping potential difference, not an independent failure bonus.
 
-As with existing fall rewards, contact is read once per control step, so contacts
-that begin and end between reads may be missed. More than four simultaneous
-contacts on one body can also hide points after reduction. The sensor's `found`
-field carries the original match count, allowing slot overflow to be logged; see
-the [MuJoCo contact sensor documentation](https://mujoco.readthedocs.io/en/stable/XMLreference.html#sensor-contact).
-This version makes no continuous collision-detection or safety guarantee.
+Predictions omit future control, articulation and contacts. Reaction time is an
+estimate, not a guarantee; no hard bound ensures a small dodge. The separate
+contact sensor includes feet, with four slots per body and position/presence
+only. Contacts between control reads or beyond slots can be missed. There is no
+physical obstacle or continuous collision/safety guarantee.
 
-## Metrics and evaluation
+## Metrics and verification
 
-The new rewards appear under `Episode_Reward/dodge_region_contact`,
-`Episode_Reward/dodge_region_first_contact`, and
-`Episode_Reward/dodge_predicted_landing_risk`. Additional
-completed-episode statistics are under `Metrics/dodge/`:
+Rewards log under `Episode_Reward/` with the three names above. Existing
+`Metrics/dodge/` fields are requested/active rates, contact rate, contact time
+fraction and slot overflow rate. Conditional rates average reset-batch summaries,
+not globally episode-weighted data; interpret them alongside active rate.
+No extra counts or active-versus-inactive comparisons are added.
 
-- `requested_rate`, `active_rate`: sampling and valid placement.
-- `contact_rate`: fraction of active episodes with at least one detected hit.
-- `contact_time_fraction`: average contacting-step fraction in active episodes.
-- `slot_overflow_rate`: average fraction of steps exceeding the per-body slots,
-  across all completed episodes, including those without regions.
-
-Conditional metrics are zero when a reset batch contains no active episode;
-interpret them with `active_rate`. As with existing task metrics, logging
-averages reset-batch summaries, not a globally episode-weighted dataset.
-
-During training analysis, inspect region hits together with the existing
-head/torso/elbow forces, forbidden terminations, lower-before-upper contact metrics,
-and action/landing displacement. No separate active-versus-inactive comparison
-metrics are added by this change.
-
-## Tests
+Inspect impact costs, head/torso/elbow forces, physics failures and actual motion.
+Missing forbidden-force termination metrics reflect its removal, not lower
+forces. Low region contact alone does not prove reactive avoidance.
 
 ```bash
 uv run pytest tests/test_fall_dodge.py tests/test_task_configs.py -q
 ```
 
-The focused tests exercise contact geometry/empty slots, coordinate transforms,
-partial resets, fixed world positions, placement rejection, first-contact state,
-predicted landing risk, contact statistics, and preservation of original fall/AMP
-config values. They require the normal project Python dependencies even though the
-tensor checks themselves run on CPU.
+Tests cover pulse timing, limb projection, late placement, observation frames,
+partial resets, contact costs, potential progress/retreat and terminal handling,
+finite-state handling and Dodge override isolation. CPU tensor tests still
+require the project's import dependencies.

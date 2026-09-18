@@ -17,11 +17,13 @@ from mjlab.tasks.fall.config.pm1.env_cfgs import pm1_flat_falling_env_cfg
 from mjlab.tasks.fall.config.pm1.rl_cfg import pm1_falling_amp_runner_cfg
 from mjlab.tasks.fall.mdp.dodge import (
   DodgeFirstContactCost,
+  DodgeLandingClearanceReward,
   DodgePredictedLandingRisk,
   DodgeRegionCommand,
   DodgeRegionCommandCfg,
   dodge_region_contact_cost,
   region_contact_mask,
+  predict_landing,
 )
 from mjlab.tasks.registry import load_env_cfg, load_rl_cfg
 
@@ -41,8 +43,9 @@ def make_region(num_envs: int = 4, **kwargs):
     data=SimpleNamespace(qpos=qpos, qvel=qvel),
     root_link_pos_w=qpos[:, :3],
     root_link_quat_w=qpos[:, 3:7],
-    body_link_pos_w=torch.zeros(num_envs, 1, 3),
-    body_link_lin_vel_w=torch.zeros(num_envs, 1, 3),
+    root_link_ang_vel_w=torch.tensor([[0.0, 0.5, 0.0]]).repeat(num_envs, 1),
+    body_link_pos_w=torch.tensor([[[0.4, 0.0, 0.5]]]).repeat(num_envs, 1, 1),
+    body_link_lin_vel_w=torch.tensor([[[1.0, 0.0, -0.5]]]).repeat(num_envs, 1, 1),
   )
   class FakeRobot(SimpleNamespace):
     body_names = ("test_body",)
@@ -63,8 +66,11 @@ def make_region(num_envs: int = 4, **kwargs):
     scene=Scene(robot=robot),
     episode_length_buf=torch.zeros(num_envs, dtype=torch.long),
     step_dt=0.02,
+    termination_manager=SimpleNamespace(terminated=torch.zeros(num_envs, dtype=torch.bool)),
   )
-  region = DodgeRegionCommand(DodgeRegionCommandCfg(**kwargs), env)
+  region = DodgeRegionCommand(
+    DodgeRegionCommandCfg(landing_body_names=("test_body",), **kwargs), env
+  )
   env.command_manager = SimpleNamespace(get_term=lambda name: region)
   return env, region
 
@@ -120,23 +126,26 @@ def test_yaw_frame_does_not_rotate_ground_position_with_root_roll():
   )
 
 
-def test_ballistic_projection_uses_observed_post_reset_velocity():
+def test_projection_waits_for_pulse_then_targets_limb_not_base():
   env, region = make_region(
     1,
     probability=1,
     current_velocity_mix=1.0,
-    flight_time_range=(0.01, 2.0),
-    landing_distance_range=(0.01, 2.0),
     placement_jitter=0.0,
     radius_range=(0.1, 0.1),
   )
   region.reset(None)
   env.episode_length_buf[:] = 1
+  env._fall_force_pulse_steps_left = torch.tensor([5])
+  for _ in range(8):
+    region.compute(env.step_dt)
+    assert not region.active.any()
+  env._fall_force_pulse_steps_left[:] = 0
   for _ in range(3):
     region.compute(env.step_dt)
-  expected_time = math.sqrt(2 * (0.82 - 0.35) / 9.81)
+  expected_time = (-0.5 + math.sqrt(0.25 + 2 * 0.4 * 9.81)) / 9.81
   torch.testing.assert_close(
-    region.center_w[0], torch.tensor([expected_time + 0.35, 0.0, 0.0]),
+    region.center_w[0], torch.tensor([expected_time + 0.4, 0.0, 0.0]),
     atol=1e-6,
     rtol=1e-6,
   )
@@ -147,7 +156,6 @@ def test_reset_samples_world_fixed_regions_and_preserves_unselected_envs():
   env, region = make_region(
     probability=1.0,
     placement_jitter=0.0,
-    landing_distance_range=(0.4, 0.4),
     radius_range=(0.1, 0.1),
   )
   qpos = env.scene["robot"].data.data.qpos.clone()
@@ -183,32 +191,33 @@ def test_sampler_rejects_late_falls_and_initial_body_overlap():
   env, region = make_region(
     3,
     probability=1,
-    landing_distance_range=(0.5, 0.5),
     placement_jitter=0,
     radius_range=(0.1, 0.1),
   )
   env.scene["robot"].data.data.qpos[0, 2] = 0.3  # Too late to dodge.
-  env.scene["robot"].data.body_link_pos_w[1, 0] = torch.tensor([0.75, 0, 0])
+  env.scene["robot"].data.body_link_pos_w[1, 0] = torch.tensor([0.4, 0, 0])
   region.reset(None)
   assert region.requested.all()
   env.episode_length_buf[:] = 1
   for _ in range(3):
     region.compute(env.step_dt)
   assert region.active.tolist() == [False, False, True]
-  torch.testing.assert_close(region.center_w[2], torch.tensor([0.85, 0, 0]))
+  assert region.center_w[2, 0] > 0.4
 
 
-def test_sampling_respects_translated_environments_and_new_reset_velocity():
+def test_sampling_respects_translated_environments_and_limb_velocity():
   env, region = make_region(
     1,
     probability=1,
-    landing_distance_range=(0.5, 0.5),
     placement_jitter=0,
   )
   env.scene.env_origins[0] = torch.tensor([10, 20, 2])
   data = env.scene["robot"].data
   data.data.qpos[0, :3] += env.scene.env_origins[0]
   data.body_link_pos_w[0] += env.scene.env_origins[0]
+  data.body_link_pos_w[0, 0, :2] = torch.tensor([10.0, 19.6])
+  data.body_link_lin_vel_w[0, 0] = torch.tensor([0.0, -1.0, -0.5])
+  data.root_link_ang_vel_w[:] = torch.tensor([0.5, 0.0, 0.0])
   data.data.qvel[0, :3] = torch.tensor([0, -1, 0])
   # Simulate derived velocity still reflecting the state before the reset push.
   data.root_link_lin_vel_w = torch.tensor([[1, 0, 0]])
@@ -217,7 +226,8 @@ def test_sampling_respects_translated_environments_and_new_reset_velocity():
   for _ in range(3):
     region.compute(env.step_dt)
   assert region.active.item()
-  torch.testing.assert_close(region.center_w[0], torch.tensor([10, 19.15, 2]))
+  expected_time = (-0.5 + math.sqrt(0.25 + 2 * 0.4 * 9.81)) / 9.81
+  torch.testing.assert_close(region.center_w[0], torch.tensor([10, 19.6 - expected_time, 2]))
 
 
 def test_contact_cost_is_bounded_and_logs_before_partial_reset():
@@ -302,6 +312,90 @@ def test_predicted_landing_risk_is_local_bounded_and_uses_selected_bodies():
   assert risk[2] == 0
 
 
+def test_clearance_shaping_rewards_improvement_and_handles_terminal_and_reset():
+  env, region = make_region(3, probability=0)
+  region.active[:2] = True
+  region.radius[:] = 0.1
+  data = env.scene["robot"].data
+  data.body_link_pos_w[:] = torch.tensor([0.0, 0.0, 0.1])
+  data.body_link_lin_vel_w.zero_()
+  reward = DodgeLandingClearanceReward(body_names=("test_body",))
+  assert torch.equal(reward(env), torch.zeros(3))  # Activation is not an action.
+  initial = reward._previous.clone()
+  data.body_link_pos_w[:, :, 0] = 0.3
+  improvement = reward(env) * env.step_dt
+  assert improvement[0] > 0.5 and improvement[2] == 0
+  data.body_link_pos_w[:, :, 0] = 0.0
+  retreat = reward(env) * env.step_dt
+  assert retreat[0] < -0.5
+  # A discounted out-and-back path has exactly the potential telescoping sum,
+  # not two positive "progress" bonuses.
+  torch.testing.assert_close(
+    improvement[:2] + reward.gamma * retreat[:2],
+    (reward.gamma**2 - 1) * initial[:2],
+  )
+  previous = reward._previous.clone()
+  env.termination_manager.terminated[0] = True
+  terminal = reward(env) * env.step_dt
+  torch.testing.assert_close(terminal[0], -previous[0])
+  # Time limits are not true terminals: preserve potential for PPO bootstrap.
+  torch.testing.assert_close(terminal[1], (reward.gamma - 1) * previous[1])
+  reward.reset(torch.tensor([0]))
+  env.termination_manager.terminated.zero_()
+  assert reward(env)[0] == 0
+  assert reward._initialized[1]
+
+
+def test_grounded_projection_and_nonfinite_shaping_remain_safe():
+  env, region = make_region(1, probability=0)
+  region.active[:] = True
+  data = env.scene["robot"].data
+  data.body_link_pos_w[:] = torch.tensor([0.0, 0.0, 0.05])
+  data.body_link_lin_vel_w[:] = torch.tensor([10.0, 0.0, 0.0])
+  xy, time = predict_landing(
+    data.body_link_pos_w, data.body_link_lin_vel_w, env.scene.env_origins[:, 2]
+  )
+  assert torch.count_nonzero(xy) == 0 and torch.count_nonzero(time) == 0
+  reward = DodgeLandingClearanceReward(body_names=("test_body",))
+  reward(env)
+  data.body_link_pos_w[:] = float("nan")
+  env.termination_manager.terminated[:] = True
+  assert torch.isfinite(reward(env)).all()
+  assert torch.isfinite(reward._previous).all()
+
+
+def test_clearance_uses_activation_snapshot_for_first_action():
+  env, region = make_region(1, probability=1, placement_jitter=0)
+  region.reset(None)
+  env.episode_length_buf[:] = 1
+  for _ in range(3):
+    region.compute(env.step_dt)
+  assert region.activation_valid.item()
+  # First action moves away after seeing the region. Its improvement must not
+  # be discarded or used as a policy-controlled initial potential baseline.
+  env.scene["robot"].data.body_link_pos_w[:, :, 1] += 0.4
+  reward = DodgeLandingClearanceReward(body_names=("test_body",))
+  assert (reward(env) * env.step_dt).item() > 0.5
+  region.reset(None)
+  reward.reset(None)
+  assert not region.activation_valid.any()
+  assert reward(env).item() == 0
+
+
+def test_upright_translation_does_not_confirm_fall_and_late_limb_is_rejected():
+  env, region = make_region(2, probability=1, placement_jitter=0)
+  data = env.scene["robot"].data
+  data.root_link_ang_vel_w[0] = 0  # Moving forward alone is not a fall.
+  data.body_link_pos_w[1, 0, 2] = 0.16
+  data.body_link_lin_vel_w[1, 0, 2] = -3  # Not enough reaction time.
+  region.reset(None)
+  env.episode_length_buf[:] = 1
+  for _ in range(45):
+    region.compute(env.step_dt)
+  assert not region.active.any()
+  assert not region.pending.any()
+
+
 def snapshot(value):
   """Compare config state, including stateful reward instances, without identity."""
   if is_dataclass(value) and not isinstance(value, type):
@@ -331,7 +425,17 @@ def test_dodge_only_adds_expected_extensions_to_fall(play):
   ]
   dodge.amp.motion_file = base.amp.motion_file
   assert dodge.commands["dodge"].probability == 0.5
-  assert dodge.commands["dodge"].landing_lead_distance == 0.35
+  assert dodge.commands["dodge"].min_reaction_time == 0.12
+  assert "forbidden_body_contact_force" not in dodge.terminations
+  assert "invalid_physics_state" in dodge.terminations
+  assert "nonfinite_state" in dodge.terminations
+  dodge.terminations = base.terminations
+  assert dodge.rewards["reduce_contact_force"].weight == 2.0
+  assert dodge.rewards["action_rate_l2"].weight == -0.15
+  for name in ("reduce_contact_force", "action_rate_l2"):
+    dodge.rewards[name].weight = base.rewards[name].weight
+  if "forbidden_contact_termination" in base.rewards:
+    dodge.rewards["forbidden_contact_termination"] = base.rewards["forbidden_contact_termination"]
   for group in ("policy", "critic"):
     term = dodge.observations[group].terms.pop("dodge_region")
     assert term.history_length == 3 and term.noise is None
@@ -341,9 +445,10 @@ def test_dodge_only_adds_expected_extensions_to_fall(play):
   first_contact = dodge.rewards.pop("dodge_region_first_contact")
   assert first_contact.weight == -0.75
   assert isinstance(first_contact.func, DodgeFirstContactCost)
-  landing_risk = dodge.rewards.pop("dodge_predicted_landing_risk")
-  assert landing_risk.weight == -0.5
-  assert isinstance(landing_risk.func, DodgePredictedLandingRisk)
+  landing_risk = dodge.rewards.pop("dodge_landing_clearance")
+  assert "dodge_predicted_landing_risk" not in dodge.rewards
+  assert landing_risk.weight == 1.0
+  assert isinstance(landing_risk.func, DodgeLandingClearanceReward)
   assert landing_risk.func.body_names == (
     "LINK_TORSO_YAW",
     "LINK_ELBOW_PITCH_L",
@@ -353,7 +458,8 @@ def test_dodge_only_adds_expected_extensions_to_fall(play):
     "LINK_KNEE_PITCH_L",
     "LINK_KNEE_PITCH_R",
   )
-  assert landing_risk.func.flight_time_range == (0.05, 0.45)
+  assert landing_risk.func.gamma == pm1_falling_amp_dodge_runner_cfg().algorithm.gamma
+  assert landing_risk.func.safety_margin == 0.05
   assert landing_risk.func.body_margin == 0.04
   assert landing_risk.func.temperature == 0.04
   sensor = dodge.scene.sensors[-1]
@@ -391,10 +497,10 @@ def test_registry_and_runner_preserve_original_amp_settings():
   [
     {"probability": 1.1},
     {"radius_range": (0, 0.1)},
-    {"landing_distance_range": (1, 0.5)},
+    {"min_reaction_time": 0.7},
     {"placement_attempts": 0},
     {"placement_jitter": -0.1},
-    {"landing_lead_distance": -0.1},
+    {"max_observation_time": -0.1},
     {"motion_observation_steps": 0},
     {"reference_frame": "invalid"},
   ],

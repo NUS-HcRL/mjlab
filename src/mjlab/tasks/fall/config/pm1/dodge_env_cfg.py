@@ -6,7 +6,7 @@ from mjlab.rl import RslRlOnPolicyRunnerCfg
 from mjlab.sensor import ContactMatch, ContactSensorCfg
 from mjlab.tasks.fall.mdp.dodge import (
   DodgeFirstContactCost,
-  DodgePredictedLandingRisk,
+  DodgeLandingClearanceReward,
   DodgeRegionCommandCfg,
   dodge_region_contact_cost,
   dodge_region_observation,
@@ -21,7 +21,7 @@ def pm1_flat_falling_dodge_env_cfg(
   use_data_reset: bool = False,
   use_data_reset_obs_history: bool = False,
 ) -> ManagerBasedRlEnvCfg:
-  """Extend the base fall configuration without changing any existing terms."""
+  """Prioritize dodge while retaining soft impact costs and physics guards."""
   cfg = pm1_flat_falling_env_cfg(
     play=play,
     use_data_reset=use_data_reset,
@@ -35,6 +35,12 @@ def pm1_flat_falling_dodge_env_cfg(
     )
   )
   cfg.commands = {"dodge": DodgeRegionCommandCfg(probability=0.5)}
+  cfg.rewards["reduce_contact_force"].weight = 2.0
+  cfg.rewards["action_rate_l2"].weight = -0.15
+  cfg.terminations.pop("forbidden_body_contact_force", None)
+  # This event reward would reference a termination that no longer exists.
+  cfg.rewards.pop("forbidden_contact_termination", None)
+  # The original fall factory and its safety settings remain unchanged.
   for group in ("policy", "critic"):
     cfg.observations[group].terms["dodge_region"] = ObservationTermCfg(
       func=dodge_region_observation,
@@ -65,8 +71,8 @@ def pm1_flat_falling_dodge_env_cfg(
     func=DodgeFirstContactCost(),
     weight=-0.75,
   )
-  cfg.rewards["dodge_predicted_landing_risk"] = RewardTermCfg(
-    func=DodgePredictedLandingRisk(
+  cfg.rewards["dodge_landing_clearance"] = RewardTermCfg(
+    func=DodgeLandingClearanceReward(
       body_names=(
         "LINK_TORSO_YAW",
         "LINK_ELBOW_PITCH_L",
@@ -76,12 +82,12 @@ def pm1_flat_falling_dodge_env_cfg(
         "LINK_KNEE_PITCH_L",
         "LINK_KNEE_PITCH_R",
       ),
-      prediction_height=0.10,
-      flight_time_range=(0.05, 0.45),
+      gamma=pm1_falling_amp_runner_cfg().algorithm.gamma,
+      safety_margin=0.05,
       body_margin=0.04,
       temperature=0.04,
     ),
-    weight=-0.5,
+    weight=1.0,
   )
   return cfg
 
