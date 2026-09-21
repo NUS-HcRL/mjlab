@@ -293,8 +293,8 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
           "LINK_SHOULDER_YAW_L",
           "LINK_SHOULDER_YAW_R",
         ),
-        high_weight=500.0,
-        medium_weight=50.0,
+        high_weight=100.0,
+        medium_weight=30.0,
         low_weight=0.5,
         sum_weight=0.25,
         # Per-robot force references are injected by the robot-specific config.
@@ -447,14 +447,14 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
   ##
 
   curriculum = {
-    "task_reward_weight": CurriculumTermCfg(
-      func=task_reward_weight_curriculum,
-      params={
-        "stages": [
-          {"step": 0, "scale": 1.0},
-        ],
-      },
-    ),
+    # "task_reward_weight": CurriculumTermCfg(
+    #   func=task_reward_weight_curriculum,
+    #   params={
+    #     "stages": [
+    #       {"step": 0, "scale": 1.0},
+    #     ],
+    #   },
+    # ),
     "reset_force_pulse": CurriculumTermCfg(
       func=reset_force_pulse_curriculum,
       params={
@@ -464,22 +464,22 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
             "step": 0,
             "duration_steps_range": (0, 3),
             "force_axis_range": {
-              "x": (-30.0, 30.0),
-              "y": (-30.0, 30.0),
+              "x": (-60.0, 60.0),
+              "y": (-60.0, 60.0),
               "z": (-10.0, -10.0),
             },
           },
+          # {
+          #   "step": 4_000 * 32,
+          #   "duration_steps_range": (2, 8),
+          #   "force_axis_range": {
+          #     "x": (-80.0, 80.0),
+          #     "y": (-80.0, 80.0),
+          #     "z": (-10.0, -10.0),
+          #   },
+          # },
           {
-            "step": 4_000 * 32,
-            "duration_steps_range": (2, 8),
-            "force_axis_range": {
-              "x": (-80.0, 80.0),
-              "y": (-80.0, 80.0),
-              "z": (-10.0, -10.0),
-            },
-          },
-          {
-            "step": 10_000 * 32,
+            "step": 5_000 * 32,
             "duration_steps_range": (4, 15),
             "force_axis_range": {
               "x": (-120.0, 120.0),
@@ -488,12 +488,12 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
             },
           },
           {
-            "step": 15_000 * 32,
+            "step": 10_000 * 32,
             "duration_steps_range": (5, 20),
             "force_axis_range": {
-              "x": (-220.0, 220.0),
-              "y": (-220.0, 220.0),
-              "z": (-80.0, -80.0),
+              "x": (-200.0, 200.0),
+              "y": (-200.0, 200.0),
+              "z": (-30.0, -30.0),
             },
           },
         ],

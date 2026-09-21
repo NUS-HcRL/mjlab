@@ -76,6 +76,17 @@ class DodgeRegionCommand(CommandTerm):
     # Save the pre-action potential geometry when a region becomes visible.
     self.activation_landing_xy = torch.zeros_like(self.robot.data.body_link_pos_w[..., :2])
     self.activation_valid = torch.zeros_like(self.active)
+    self.push_direction_w = torch.zeros_like(self.center_w)
+    self._reset_quat = torch.zeros(self.num_envs, 4, device=self.device)
+    self._push_angle = torch.zeros_like(self.radius)
+    if cfg.at_reset:
+      # Compiled collision bounding spheres conservatively include feet and
+      # limbs, unlike an origin-only clearance check. Cache static model data.
+      ids = self.robot.indexing.geom_ids.cpu().numpy()
+      model = env.sim.mj_model
+      collision = (model.geom_contype[ids] != 0) | (model.geom_conaffinity[ids] != 0)
+      self._collision_geom_ids = torch.as_tensor(ids[collision], device=self.device, dtype=torch.long)
+      self._geom_bounds = torch.as_tensor(model.geom_rbound[ids[collision]], device=self.device, dtype=torch.float32)
     self._landing_body_ids, matched = self.robot.find_bodies(
       cfg.landing_body_names, preserve_order=True
     )
@@ -85,6 +96,10 @@ class DodgeRegionCommand(CommandTerm):
   @property
   def command(self) -> torch.Tensor:
     """Return [active, relative position (3), radius] in the configured frame."""
+    # Manual env.reset() calls forward then observations, without compute().
+    # Lazy activation here sees fresh geometry and makes the first obs complete.
+    if self.cfg.at_reset:
+      self._activate_reset_regions()
     root_quat = self.robot.data.root_link_quat_w
     if self.cfg.reference_frame == "yaw":
       root_quat = yaw_quat(root_quat)
@@ -131,6 +146,9 @@ class DodgeRegionCommand(CommandTerm):
     return extras
 
   def compute(self, dt: float) -> None:
+    if self.cfg.at_reset:
+      self._activate_reset_regions()
+      return
     # The force-pulse interval event starts after this method on the reset step.
     # A positive pulse counter means the just-completed physics step was forced.
     # Only count complete unforced steps; interval events clear the pulse later.
@@ -174,6 +192,56 @@ class DodgeRegionCommand(CommandTerm):
     self.pending[env_ids] = self.requested[env_ids] & eligible
     self._motion_steps[env_ids] = 0
     self._motion_start_pos_w[env_ids] = root_pos
+    if cfg.at_reset:
+      quat = data.data.qpos[env_ids][:, self.robot.indexing.free_joint_q_adr[3:7]]
+      self._reset_quat[env_ids] = yaw_quat(quat)
+      angle = (2 * torch.rand(n, device=self.device) - 1) * math.radians(cfg.forward_half_angle_deg)
+      self._push_angle[env_ids] = angle
+      local = torch.stack((torch.cos(angle), torch.sin(angle), torch.zeros_like(angle)), -1)
+      self.push_direction_w[env_ids] = quat_apply(self._reset_quat[env_ids], local)
+
+  def _activate_reset_regions(self) -> None:
+    """Place once, after reset forward kinematics and before the first action."""
+    ids = self.pending.nonzero(as_tuple=False).squeeze(-1)
+    if ids.numel() == 0:
+      return
+    cfg = self.cfg
+    n, k = len(ids), cfg.placement_attempts
+    random = torch.rand(n, k, 3, device=self.device)
+    angle = self._push_angle[ids, None] + (2 * random[..., 0] - 1) * math.radians(cfg.region_angle_jitter_deg)
+    limit = math.radians(cfg.forward_half_angle_deg)
+    angle = angle.clamp(-limit, limit)
+    lo, hi = cfg.forward_distance_range
+    distance = lo + (hi - lo) * random[..., 1]
+    local = torch.stack((distance * torch.cos(angle), distance * torch.sin(angle), torch.zeros_like(angle)), -1)
+    quat = self._reset_quat[ids, None].expand(-1, k, -1)
+    candidates = self._motion_start_pos_w[ids, None] + quat_apply(quat, local)
+    ground = self._env.scene.env_origins[ids, 2]
+    candidates[..., 2] = ground[:, None]
+    lo, hi = cfg.radius_range
+    radii = lo + (hi - lo) * random[..., 2]
+    geom_pos = self.robot.data.data.geom_xpos[ids][:, self._collision_geom_ids]
+    bounds = self._geom_bounds
+    low = (geom_pos[..., 2] - bounds[None]) <= ground[:, None] + cfg.low_body_height
+    separation = torch.linalg.vector_norm(candidates[:, :, None, :2] - geom_pos[:, None, :, :2], dim=-1)
+    overlap = separation <= radii[..., None] + bounds[None, None] + cfg.initial_body_clearance
+    valid = ~(overlap & low[:, None]).any(-1)
+    valid &= torch.isfinite(geom_pos).all(dim=(1, 2))[:, None]
+    valid &= torch.isfinite(candidates).all(-1)
+    chosen = valid.long().argmax(-1)
+    rows = torch.arange(n, device=self.device)
+    active = valid.any(-1)
+    self.active[ids] = active
+    self.center_w[ids] = torch.where(active[:, None], candidates[rows, chosen], 0.0)
+    self.radius[ids] = torch.where(active, radii[rows, chosen], 0.0)
+    activated = ids[active]
+    data = self.robot.data
+    self.activation_landing_xy[activated], _ = predict_landing(
+      data.body_link_pos_w[activated], data.body_link_lin_vel_w[activated],
+      self._env.scene.env_origins[activated, 2],
+    )
+    self.activation_valid[activated] = True
+    self.pending[ids] = False
 
   def _activate_regions(self, env_ids: torch.Tensor, dt: float) -> None:
     """Place near a descending limb in the confirmed tipping direction."""
@@ -304,6 +372,10 @@ class DodgeRegionCommandCfg(CommandTermCfg):
   debug_vis: bool = True
   asset_name: str = "robot"
   probability: float = 0.2
+  at_reset: bool = False
+  forward_half_angle_deg: float = 30.0
+  region_angle_jitter_deg: float = 10.0
+  forward_distance_range: tuple[float, float] = (0.60, 0.90)
   reference_frame: Literal["yaw", "full"] = "yaw"
   motion_observation_steps: int = 3
   radius_range: tuple[float, float] = (0.08, 0.14)
@@ -335,7 +407,7 @@ class DodgeRegionCommandCfg(CommandTermCfg):
       raise ValueError("reference_frame must be 'yaw' or 'full'")
     if self.motion_observation_steps < 1:
       raise ValueError("motion_observation_steps must be positive")
-    for name in ("radius_range",):
+    for name in ("radius_range", "forward_distance_range"):
       lo, hi = getattr(self, name)
       if not (math.isfinite(lo) and math.isfinite(hi) and 0 < lo <= hi):
         raise ValueError(f"{name} must contain ordered positive finite values")
@@ -354,6 +426,10 @@ class DodgeRegionCommandCfg(CommandTermCfg):
         raise ValueError(f"{name} must be finite and nonnegative")
     if self.gravity_magnitude <= 0:
       raise ValueError("gravity_magnitude must be positive")
+    if not 0 < self.forward_half_angle_deg < 90:
+      raise ValueError("Forward half angle must be in (0, 90) degrees")
+    if not math.isfinite(self.region_angle_jitter_deg) or self.region_angle_jitter_deg < 0:
+      raise ValueError("Region angle jitter must be finite and nonnegative")
     if not 0 < self.min_reaction_time < self.max_flight_time:
       raise ValueError("Reaction time must be positive and below max flight time")
     if self.max_observation_time <= 0 or not self.landing_body_names:

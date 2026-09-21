@@ -7,6 +7,7 @@ from dataclasses import fields, is_dataclass
 from types import FunctionType, SimpleNamespace
 
 import pytest
+import numpy as np
 import torch
 
 from mjlab.tasks.fall.config.pm1.dodge_env_cfg import (
@@ -26,6 +27,8 @@ from mjlab.tasks.fall.mdp.dodge import (
   predict_landing,
 )
 from mjlab.tasks.registry import load_env_cfg, load_rl_cfg
+from mjlab.managers.scene_entity_config import SceneEntityCfg
+from mjlab.tasks.fall.mdp.events import apply_external_force_torque_axiswise_pulse
 
 
 def make_region(num_envs: int = 4, **kwargs):
@@ -36,11 +39,12 @@ def make_region(num_envs: int = 4, **kwargs):
   qvel = torch.zeros(num_envs, 6)
   qvel[:, 0] = 1
   indexing = SimpleNamespace(
-    free_joint_q_adr=torch.arange(7), free_joint_v_adr=torch.arange(6)
+    free_joint_q_adr=torch.arange(7), free_joint_v_adr=torch.arange(6),
+    geom_ids=torch.tensor([0]),
   )
   data = SimpleNamespace(
     is_fixed_base=False,
-    data=SimpleNamespace(qpos=qpos, qvel=qvel),
+    data=SimpleNamespace(qpos=qpos, qvel=qvel, geom_xpos=torch.zeros(num_envs, 1, 3)),
     root_link_pos_w=qpos[:, :3],
     root_link_quat_w=qpos[:, 3:7],
     root_link_ang_vel_w=torch.tensor([[0.0, 0.5, 0.0]]).repeat(num_envs, 1),
@@ -67,6 +71,10 @@ def make_region(num_envs: int = 4, **kwargs):
     episode_length_buf=torch.zeros(num_envs, dtype=torch.long),
     step_dt=0.02,
     termination_manager=SimpleNamespace(terminated=torch.zeros(num_envs, dtype=torch.bool)),
+    sim=SimpleNamespace(mj_model=SimpleNamespace(
+      geom_contype=np.array([1]), geom_conaffinity=np.array([1]),
+      geom_rbound=np.array([0.10]),
+    )),
   )
   region = DodgeRegionCommand(
     DodgeRegionCommandCfg(landing_body_names=("test_body",), **kwargs), env
@@ -419,13 +427,25 @@ def test_dodge_only_adds_expected_extensions_to_fall(play):
   assert base.amp is not None and isinstance(base.amp.motion_file, list)
   assert dodge.amp is not None and isinstance(dodge.amp.motion_file, list)
   assert dodge.amp.motion_file == [
-    *base.amp.motion_file,
+    *(base.amp.motion_file if play else ["motion_file/pm_fall4:v0/Front_1_converted_50fps.npz"]),
     "motion_file/pm_fall4:v0/tofront_dodgeleft_v2.3_50fps.npz",
     "motion_file/pm_fall4:v0/tofront_dodgeright_v2.3_50fps.npz",
   ]
   dodge.amp.motion_file = base.amp.motion_file
+  if not play:
+    reset = dodge.events["reset_base"].params
+    assert len(reset["stable_state_files"]) == 1
+    assert reset["stable_state_files"][0].endswith("forward_walk.npy")
+    assert reset["stable_standing_probability"] == 0.5
+    assert reset["data_probability"] == 0
+    assert "push_robot" not in dodge.events
+    assert dodge.events["push_force_pulse"].params["forward_command_name"] == "dodge"
+  else:
+    assert snapshot(dodge.events) == snapshot(base.events)
+  dodge.events = base.events
   assert dodge.commands["dodge"].probability == 0.5
-  assert dodge.commands["dodge"].min_reaction_time == 0.12
+  assert dodge.commands["dodge"].at_reset
+  assert dodge.commands["dodge"].forward_distance_range == (0.6, 0.9)
   assert "forbidden_body_contact_force" not in dodge.terminations
   assert "invalid_physics_state" in dodge.terminations
   assert "nonfinite_state" in dodge.terminations
@@ -490,6 +510,75 @@ def test_registry_and_runner_preserve_original_amp_settings():
   )
   runner.algorithm.reward_mix_scale_clip = base.algorithm.reward_mix_scale_clip
   assert snapshot(runner) == snapshot(base)
+
+
+def test_front_region_visible_in_first_observation_and_world_fixed():
+  torch.manual_seed(5)
+  env, region = make_region(64, at_reset=True, probability=1)
+  # Face world +Y: both force and obstacle must rotate with initial yaw.
+  data = env.scene["robot"].data
+  data.root_link_quat_w[:] = torch.tensor([math.sqrt(0.5), 0, 0, math.sqrt(0.5)])
+  region.reset(None)
+  obs = region.command  # Manual reset path: no command.compute yet.
+  assert region.active.all()
+  assert (obs[:, 0] == 1).all()
+  distance = torch.linalg.vector_norm(region.center_w[:, :2], dim=-1)
+  assert ((distance >= 0.6) & (distance <= 0.9)).all()
+  assert (region.center_w[:, 1] > 0).all()
+  assert (region.center_w[:, 0].abs() <= region.center_w[:, 1] * math.tan(math.pi / 6) + 1e-6).all()
+  assert (region.push_direction_w[:, 1] >= math.cos(math.pi / 6)).all()
+  center, direction = region.center_w.clone(), region.push_direction_w.clone()
+  data.root_link_pos_w[:, 0] += 2
+  region.compute(env.step_dt)
+  torch.testing.assert_close(region.center_w, center)
+  torch.testing.assert_close(region.push_direction_w, direction)
+
+
+def test_front_region_checks_fresh_collision_geometry_and_partial_reset():
+  env, region = make_region(2, at_reset=True, probability=1)
+  region.reset(None)
+  # Stand-in for freshly forwarded low geometry covering the entire sector.
+  # If stale geometry were used at command.reset(), this would not reject it.
+  region._geom_bounds[:] = 1.0
+  env.scene["robot"].data.data.geom_xpos[0, 0] = torch.tensor([0.5, 0.0, 0.0])
+  env.scene["robot"].data.data.geom_xpos[1, 0] = torch.tensor([-5.0, 0.0, 0.0])
+  region.compute(env.step_dt)
+  assert region.active.tolist() == [False, True]
+  assert not region.pending.any()
+  center = region.center_w[1].clone()
+  region.cfg.probability = 0
+  region.reset(torch.tensor([0]))
+  torch.testing.assert_close(region.center_w[1], center)
+  assert region.command[0].count_nonzero() == 0
+
+
+def test_forward_pulse_uses_reset_heading_even_without_region_and_expires():
+  env, region = make_region(16, at_reset=True, probability=0)
+  robot = env.scene["robot"]
+  robot.data.root_link_quat_w[:] = torch.tensor([math.sqrt(0.5), 0, 0, math.sqrt(0.5)])
+  region.reset(None)
+  direction = region.push_direction_w.clone()
+  captured = []
+  robot.write_external_wrench_to_sim = lambda force, torque, **kw: captured.append(force.clone())
+  env._fall_force_pulse_pending = torch.ones(16, dtype=torch.bool)
+  args = dict(
+    force_axis_range={"x": (-80.0, 80.0), "y": (-80.0, 80.0), "z": (-10.0, -10.0)},
+    duration_steps=2, forward_command_name="dodge",
+    asset_cfg=SceneEntityCfg("robot", body_ids=[0]),
+  )
+  # Subsequent robot yaw must not rotate the reset-sampled force direction.
+  robot.data.root_link_quat_w[:] = torch.tensor([1.0, 0, 0, 0])
+  apply_external_force_torque_axiswise_pulse(env, **args)
+  force = captured[-1][:, 0]
+  norm = torch.linalg.vector_norm(force[:, :2], dim=-1)
+  assert ((norm >= 0) & (norm <= 80)).all()
+  torch.testing.assert_close(force[:, :2], direction[:, :2] * norm[:, None])
+  torch.testing.assert_close(force[:, 2], torch.full((16,), -10.0))
+  assert not region.active.any()
+  apply_external_force_torque_axiswise_pulse(env, **args)
+  assert len(captured) == 1
+  apply_external_force_torque_axiswise_pulse(env, **args)
+  assert captured[-1].count_nonzero() == 0
 
 
 @pytest.mark.parametrize(

@@ -10,7 +10,17 @@ nonfinite/invalid-physics guards and time limits. There are no hard head/torso/e
 impact limits in Dodge; a soft reward cannot guarantee safe impacts. The broad
 invalid-physics guard still rejects extreme forces/speeds. Region request
 probability stays at 0.5, AMP mix clip at (0.02, 0.25), and KL early stopping is
-disabled. The two extra dodge reference clips remain included.
+disabled. Training now uses only ordinary front-fall and the two front-fall dodge
+reference clips. Training resets mix exact standing and forward_walk.npy at 50/50;
+CSV resets and adaptive disturbance replay are disabled in this task.
+
+The training pulse is fixed in the reset yaw frame within +/-30 degrees forward.
+Its horizontal magnitude is uniform from zero to the current curriculum cap
+(30, 80, 120, then 220 N); Z force and pulse duration stages are unchanged.
+This retains the stage caps, not the old independent XY magnitude distribution.
+The independent world-axis velocity push is removed in training. The direction
+is sampled even on episodes without a region and does not track later rotation.
+Play reset/push logic and its reference pool are intentionally unchanged.
 
 ## Run
 
@@ -35,27 +45,26 @@ Implementation: `src/mjlab/tasks/fall/mdp/dodge.py`.
 | Setting | Default | Meaning |
 | --- | --- | --- |
 | probability | 0.5 (task override) | Request probability |
-| motion_observation_steps | 3 | Complete unforced frames after pulse ends |
+| at_reset | true (task override) | Visible in the first observation after reset |
+| forward_half_angle_deg | 30 | Forward push/region half cone |
+| region_angle_jitter_deg | 10 | Region offset around push angle, clipped to cone |
+| forward_distance_range | (0.60, 0.90) m | Distance from reset base |
 | radius_range | (0.08, 0.14) m | Unchanged disc radius |
-| prediction_height | 0.10 m | Link landing plane |
-| min_reaction_time | 0.12 s | Minimum estimated reaction time |
-| max_flight_time | 0.65 s | Extrapolation cap |
-| max_observation_time | 0.8 s | Unforced observation window |
-| direction_lookahead | 0.15 s | Tilt/rotation/motion direction estimate |
-| min_tilt / min_tipping_speed | 0.10 / 0.30 | Horizontal up-vector magnitude or tipping speed confirming a fall |
-| placement_jitter | 0.12 m | Jitter around selected limb projection |
 | min_root_height | 0.45 m | Reject low/late states |
-| initial_body_clearance | 0.18 m | Clearance beyond radius from low bodies |
-| placement_attempts | 8 | Candidates per eligible observation frame |
+| initial_body_clearance | 0.18 m | Extra clearance from low collision bounds |
+| placement_attempts | 8 | Candidates at reset, then disable on failure |
 
-Placement waits for the pulse to end and three complete unforced steps.
-Tilt, world angular velocity and observed/current translation estimate direction;
-upright translation alone does not confirm a fall. A descending elbow pitch/end
-or knee in that direction is selected with sufficient estimated reaction time.
-Candidates lie near that link's ballistic landing point, not a fixed base offset
-or the average between hands. Ambiguous/overlapping candidates are retried within
-the observation window; late/low states are rejected. Active fraction can thus
-be below 50%. Robot reset states are never altered to accommodate a region.
+Placement no longer waits for the pulse, motion frames or a predicted reaction
+time. Reset samples the force direction; region candidates are sampled in the
+same forward sector. The candidate check happens after reset forward kinematics,
+before observations (including manual env.reset). Low collidable geoms are
+represented by conservative compiled bounding spheres, including foot extent,
+and candidates overlapping their horizontal bounds plus clearance are rejected.
+No future trajectory simulation is needed. Low resets are still rejected; actual
+active fraction may be below 50%. This only avoids initial overlap, not future
+impact. Reset robot states are never moved to accommodate a region. The legacy
+post-pulse placement path is retained behind at_reset=false, but is not used by
+the Dodge task. Ballistic prediction remains in the unchanged shaping reward.
 
 Once active, the region is world-fixed for the episode. Observation is
 `[active, relative_x, relative_y, relative_z, radius]` in yaw-only LINK_BASE

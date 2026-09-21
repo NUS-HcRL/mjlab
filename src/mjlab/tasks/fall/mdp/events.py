@@ -1572,6 +1572,7 @@ def apply_external_force_torque_axiswise_pulse(
   data_direction_duration_steps_range: tuple[int, int] | None = None,
   cooldown_steps: int = 0,
   preserve_data_reset_states: bool = True,
+  forward_command_name: str | None = None,
   asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
 ) -> None:
   """Single-event external wrench pulse manager (interval mode).
@@ -1705,13 +1706,26 @@ def apply_external_force_torque_axiswise_pulse(
       fresh_mask = ~replay_mask
       if fresh_mask.any():
         fresh_env_ids = regular_target_env_ids[fresh_mask]
-        applied = apply_external_force_torque_axiswise(
-          env=env,
-          env_ids=fresh_env_ids,
-          force_axis_range=force_axis_range,
-          torque_axis_range=torque_axis_range,
-          asset_cfg=asset_cfg,
-        )
+        if forward_command_name is None:
+          applied = apply_external_force_torque_axiswise(
+            env=env,
+            env_ids=fresh_env_ids,
+            force_axis_range=force_axis_range,
+            torque_axis_range=torque_axis_range,
+            asset_cfg=asset_cfg,
+          )
+        else:
+          # Reuse the direction sampled with the region at reset. The existing
+          # curriculum supplies magnitude caps and duration, not world XY signs.
+          region = env.command_manager.get_term(forward_command_name)
+          cap = max(abs(v) for key in ("x", "y") for v in force_axis_range.get(key, (0.0, 0.0)))
+          magnitude = torch.rand(len(fresh_env_ids), device=env.device) * cap
+          force_w = region.push_direction_w[fresh_env_ids] * magnitude[:, None]
+          zlo, zhi = force_axis_range.get("z", (0.0, 0.0))
+          force_w[:, 2] = sample_uniform(zlo, zhi, (len(fresh_env_ids),), env.device)
+          torque_w = torch.zeros_like(force_w)
+          _apply_external_wrench_vectors(env, fresh_env_ids, force_w, torque_w, asset_cfg)
+          applied = (force_w, torque_w)
         if isinstance(sampler, FallAdaptiveResetSampler) and applied is not None:
           force_w, torque_w = applied
           sampler.record_reset_force_pulse(

@@ -34,7 +34,34 @@ def pm1_flat_falling_dodge_env_cfg(
       "motion_file/pm_fall4:v0/tofront_dodgeright_v2.3_50fps.npz",
     )
   )
-  cfg.commands = {"dodge": DodgeRegionCommandCfg(probability=0.5)}
+  cfg.commands = {"dodge": DodgeRegionCommandCfg(probability=0.5, at_reset=True)}
+  if not play:
+    cfg.amp.motion_file = [
+      path for path in cfg.amp.motion_file
+      if path.rsplit("/", 1)[-1] in (
+        "Front_1_converted_50fps.npz",
+        "tofront_dodgeleft_v2.3_50fps.npz",
+        "tofront_dodgeright_v2.3_50fps.npz",
+      )
+    ]
+    reset = cfg.events["reset_base"].params
+    reset["stable_state_files"] = tuple(
+      p for p in reset["stable_state_files"] if p.endswith("forward_walk.npy")
+    )
+    if not reset["stable_state_files"]:
+      raise ValueError("Forward dodge requires forward_walk.npy reset states")
+    reset["stable_standing_probability"] = 0.5
+    reset["data_probability"] = 0.0
+    reset["motion_files"] = ()
+    reset["use_data_reset_obs_history"] = False
+    reset["adaptive_replay_probability"] = 0.0
+    # Do not allow the independent world-axis velocity disturbances to turn a
+    # forward-only training episode into a lateral/backward push.
+    cfg.events.pop("push_robot", None)
+    pulse = cfg.events["push_force_pulse"].params
+    pulse["forward_command_name"] = "dodge"
+    pulse["data_direction_force_magnitude_range"] = None
+    pulse["preserve_data_reset_states"] = False
   cfg.rewards["reduce_contact_force"].weight = 2.0
   cfg.rewards["action_rate_l2"].weight = -0.15
   cfg.terminations.pop("forbidden_body_contact_force", None)
