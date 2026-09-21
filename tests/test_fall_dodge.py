@@ -445,7 +445,8 @@ def test_dodge_only_adds_expected_extensions_to_fall(play):
   dodge.events = base.events
   assert dodge.commands["dodge"].probability == 0.5
   assert dodge.commands["dodge"].at_reset
-  assert dodge.commands["dodge"].forward_distance_range == (0.6, 0.9)
+  assert dodge.commands["dodge"].forward_distance_range == (1.0, 2.0)
+  assert dodge.commands["dodge"].radius_range == (0.08, 0.14)
   assert "forbidden_body_contact_force" not in dodge.terminations
   assert "invalid_physics_state" in dodge.terminations
   assert "nonfinite_state" in dodge.terminations
@@ -523,7 +524,7 @@ def test_front_region_visible_in_first_observation_and_world_fixed():
   assert region.active.all()
   assert (obs[:, 0] == 1).all()
   distance = torch.linalg.vector_norm(region.center_w[:, :2], dim=-1)
-  assert ((distance >= 0.6) & (distance <= 0.9)).all()
+  assert ((distance >= 1.0 - 1e-6) & (distance <= 2.0 + 1e-6)).all()
   assert (region.center_w[:, 1] > 0).all()
   assert (region.center_w[:, 0].abs() <= region.center_w[:, 1] * math.tan(math.pi / 6) + 1e-6).all()
   assert (region.push_direction_w[:, 1] >= math.cos(math.pi / 6)).all()

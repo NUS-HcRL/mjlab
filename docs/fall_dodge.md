@@ -48,8 +48,8 @@ Implementation: `src/mjlab/tasks/fall/mdp/dodge.py`.
 | at_reset | true (task override) | Visible in the first observation after reset |
 | forward_half_angle_deg | 30 | Forward push/region half cone |
 | region_angle_jitter_deg | 10 | Region offset around push angle, clipped to cone |
-| forward_distance_range | (0.60, 0.90) m | Distance from reset base |
-| radius_range | (0.08, 0.14) m | Unchanged disc radius |
+| forward_distance_range | (1.00, 2.00) m | Distance from reset base, aimed farther toward torso/head landing area |
+| radius_range | (0.08, 0.14) m | Ground disc radius |
 | min_root_height | 0.45 m | Reject low/late states |
 | initial_body_clearance | 0.18 m | Extra clearance from low collision bounds |
 | placement_attempts | 8 | Candidates at reset, then disable on failure |

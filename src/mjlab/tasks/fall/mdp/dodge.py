@@ -375,7 +375,7 @@ class DodgeRegionCommandCfg(CommandTermCfg):
   at_reset: bool = False
   forward_half_angle_deg: float = 30.0
   region_angle_jitter_deg: float = 10.0
-  forward_distance_range: tuple[float, float] = (0.60, 0.90)
+  forward_distance_range: tuple[float, float] = (1.00, 2.00)
   reference_frame: Literal["yaw", "full"] = "yaw"
   motion_observation_steps: int = 3
   radius_range: tuple[float, float] = (0.08, 0.14)
