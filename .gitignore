@@ -12,6 +12,7 @@ motions/
 *.mp4
 artifacts/
 outputs/
+tmp/
 .venv/
 render_robots.py
 .DS_Store

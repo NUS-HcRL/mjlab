@@ -180,9 +180,9 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
         "data_low_clearance_height": 0.35,
         # Keep fresh stable-state sampling as the exploration floor while
         # replaying neighborhoods of safety-critical terminated episodes.
-        "adaptive_sampling": True,
+        "adaptive_sampling": False,
         "adaptive_buffer_size": 4096,
-        "adaptive_replay_probability": 0.0,
+        "adaptive_replay_probability": 0.2,
         "adaptive_min_failures": 128,
         "adaptive_neighbor_scale": 0.15,
         # Tracking-style priority mixture: successful replays gradually lose
