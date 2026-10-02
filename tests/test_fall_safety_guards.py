@@ -125,6 +125,7 @@ def test_contact_force_penalty_is_linear_until_bounded():
   )
   term = ReduceContactForceWeighted(
     sensor_name="body_contact_force",
+    low_weight=1.0,
     sum_weight=0.25,
     squash_scale=0.0,
     max_penalty=2.0,
@@ -168,6 +169,55 @@ def test_contact_force_penalty_cannot_be_diluted_by_tiny_contacts():
   reward = term(env)
 
   assert reward[1] <= reward[0]
+
+
+def test_log_contact_force_reward_distinguishes_large_impacts():
+  forces = torch.tensor([50.0, 200.0, 400.0, 800.0])
+  sensor = SimpleNamespace(
+    _slots=[SimpleNamespace(primary_name="head")],
+    data=SimpleNamespace(
+      found=torch.ones(4, 1, dtype=torch.int64),
+      force=torch.stack((forces, forces * 0, forces * 0), dim=-1)[:, None],
+    ),
+  )
+  env = SimpleNamespace(num_envs=4, device="cpu", scene={"contact": sensor})
+  term = ReduceContactForceWeighted(
+    sensor_name="contact", high_weight_bodies=("head",), high_weight=10.0,
+    body_force_scales={"head": 200.0}, sum_weight=0.0625,
+    squash_scale=0.5, max_penalty=None,
+  )
+  reward = term(env)
+  raw = 1.0625 * 10.0 * forces / 200.0
+  torch.testing.assert_close(reward, -2.0 * torch.log1p(raw / 2.0))
+  assert torch.all(reward[1:] < reward[:-1])
+
+
+def test_invalid_contact_force_is_finite_in_reward_and_terminates():
+  forces = torch.tensor([float("nan"), float("inf"), 300.0])
+  sensor = SimpleNamespace(
+    _slots=[SimpleNamespace(primary_name="head")],
+    data=SimpleNamespace(
+      found=torch.ones(3, 1, dtype=torch.int64),
+      force=torch.stack((forces, torch.zeros(3), torch.zeros(3)), dim=-1)[:, None],
+    ),
+  )
+  robot = SimpleNamespace(data=SimpleNamespace(
+    body_link_lin_vel_w=torch.zeros(3, 1, 3), joint_vel=torch.zeros(3, 2)
+  ))
+  env = SimpleNamespace(num_envs=3, device="cpu", scene={"contact": sensor, "robot": robot})
+  term = ReduceContactForceWeighted(
+    sensor_name="contact", high_weight_bodies=("head",), high_weight=10.0,
+    body_force_scales={"head": 200.0}, sum_weight=0.0625,
+    squash_scale=0.5, max_penalty=None,
+  )
+  reward = term(env)
+  assert torch.isfinite(reward).all()
+  assert torch.all(reward[:2] < reward[2])
+  torch.testing.assert_close(
+    invalid_physics_state(env, sensor_name="contact"),
+    torch.tensor([True, True, False]),
+  )
+  assert all(torch.isfinite(value).all() for value in term.reset().values())
 
 
 def test_forbidden_contact_barrier_is_zero_without_force():

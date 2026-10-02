@@ -610,15 +610,15 @@ class ReduceContactForceWeighted:
     high_weight_bodies: List of body names with high vulnerability (e.g., head, hands).
     shoulder_weight_bodies: List of shoulder body names with dedicated vulnerability weight.
     medium_weight_bodies: List of body names with medium vulnerability.
-    high_weight: Sensitivity weight for high vulnerability bodies (default: 1000.0).
+    high_weight: Sensitivity weight for high vulnerability bodies (default: 10.0).
     shoulder_weight: Sensitivity weight for shoulder bodies (default: 5.0).
     medium_weight: Sensitivity weight for medium vulnerability bodies (default: 1.0).
-    low_weight: Sensitivity weight for low vulnerability bodies (default: 0.5).
+    low_weight: Sensitivity weight for low vulnerability bodies (default: 0.1).
     sum_weight: Weight on cumulative normalized force in addition to the peak.
     squash_scale: Log-compression scale; set to zero to keep the penalty linear.
     max_penalty: Optional upper bound applied before compression for numerical safety.
     body_force_scales: Optional per-body reference forces. When provided, the reward
-      uses physical force divided by its reference instead of vulnerability weights.
+      multiplies physical force divided by its reference by the body weight.
     default_force_scale: Reference force for bodies absent from body_force_scales.
 
   Returns:
@@ -732,7 +732,19 @@ class ReduceContactForceWeighted:
 
     forces = sensor.data.force
     contact_indicators = (sensor.data.found > 0).float()
-    force_norm = torch.norm(contact_indicators.unsqueeze(-1) * forces, dim=-1)
+    active_forces = torch.where(
+      contact_indicators.unsqueeze(-1).bool(), forces, torch.zeros_like(forces)
+    )
+    force_norm = torch.norm(active_forces, dim=-1)
+    invalid_force = (~torch.isfinite(forces)).any(dim=-1).any(dim=-1) | (
+      ~torch.isfinite(force_norm)
+    ).any(dim=-1)
+    # Only replace invalid norms; finite physical forces are never capped here.
+    # This sentinel is above the invalid-physics threshold, whose termination
+    # path supplies a separate terminal cost in the AMP runner.
+    force_norm = torch.nan_to_num(
+      force_norm, nan=1_000_000.0, posinf=1_000_000.0, neginf=1_000_000.0
+    )
     weights = _build_body_weight_tensor(
       body_names=self._body_names,
       device=forces.device,
@@ -755,7 +767,7 @@ class ReduceContactForceWeighted:
 
     if self.body_force_scales is not None:
       assert self._force_scales is not None
-      reward_force_norm = force_norm / self._force_scales.unsqueeze(0)
+      reward_force_norm = weighted_force_norm / self._force_scales.unsqueeze(0)
     else:
       reward_force_norm = weighted_force_norm
 
@@ -767,6 +779,7 @@ class ReduceContactForceWeighted:
     penalty = peak_term + self.sum_weight * sum_term
 
     self._metric_steps += 1.0
+    self._accumulate("invalid_force_rate", invalid_force.float())
     high_max = self._group_max(force_norm, self.high_weight_bodies)
     shoulder_max = self._group_max(force_norm, self.shoulder_weight_bodies)
     medium_max = self._group_max(force_norm, self.medium_weight_bodies)

@@ -293,16 +293,18 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
           "LINK_SHOULDER_YAW_L",
           "LINK_SHOULDER_YAW_R",
         ),
-        high_weight=500.0,
-        medium_weight=50.0,
-        low_weight=0.5,
-        sum_weight=0.25,
+        high_weight=50.0,
+        medium_weight=10.0,
+        low_weight=1.0,
+        # Fixed normalization (0.25 / 4), independent of active contact count.
+        sum_weight=0.0625,
         # Per-robot force references are injected by the robot-specific config.
-        squash_scale=0.0,
-        max_penalty=2.0,
+        # 2 * log1p(raw_penalty / 2): compress large impacts without saturation.
+        squash_scale=0.5,
+        max_penalty=None,
         body_force_scales={},
         # All bodies without an explicit per-robot reference use this scale.
-        default_force_scale=3000.0,
+        default_force_scale=2000.0,
         tracked_body_names=(
           "LINK_HEAD_YAW",
           "LINK_TORSO_YAW",
@@ -312,7 +314,7 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
           "LINK_SHOULDER_ROLL_R",
         ),
       ),
-      weight=10.0,
+      weight=1.0,
     ),
     "forbidden_contact_force_penalty": RewardTermCfg(
       func=mdp.ForbiddenContactForcePenalty(

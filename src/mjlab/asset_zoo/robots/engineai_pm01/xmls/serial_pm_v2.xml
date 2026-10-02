@@ -40,7 +40,7 @@
                 </default>
 
                 <default class="collision_left_elbow_end">
-                    <geom type="sphere" size="0.05" pos="0.03 -0.02 -0.14" rgba="0.804 0.361 0.031 0.5" />
+                    <geom type="sphere" size="0.045" pos="0.03 -0.02 -0.14" rgba="0.804 0.361 0.031 0.5" />
                 </default>
                 <default class="collision_left_elbow_end1">
                     <geom type="box" size="0.02 0.02 0.05" quat="1 0 0 0" pos="0 0 -0.02" rgba="0.804 0.361 0.031 0.5"/>
@@ -51,7 +51,7 @@
                 </default>
 
                 <default class="collision_right_elbow_end">
-                    <geom type="sphere" size="0.05" pos="0.03 0.02 -0.14" rgba="0.804 0.361 0.031 0.5"/>
+                    <geom type="sphere" size="0.045" pos="0.03 0.02 -0.14" rgba="0.804 0.361 0.031 0.5"/>
                 </default>
                 <default class="collision_right_elbow_end1">
                     <geom type="box" size="0.02 0.02 0.05" quat="1 0 0 0" pos="0 0 -0.02" rgba="0.804 0.361 0.031 0.5"/>

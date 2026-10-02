@@ -209,7 +209,8 @@ def invalid_physics_state(
   contact_force = torch.linalg.vector_norm(sensor.data.force, dim=-1)
 
   return (
-    (body_speed > max_body_linear_speed).any(dim=-1)
+    (~torch.isfinite(sensor.data.force)).any(dim=-1).any(dim=-1)
+    | (body_speed > max_body_linear_speed).any(dim=-1)
     | (joint_speed > max_joint_speed).any(dim=-1)
     | (contact_force > max_contact_force).any(dim=-1)
   )
