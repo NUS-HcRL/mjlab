@@ -170,22 +170,18 @@ def pm1_flat_falling_env_cfg(
   )
   forbidden_termination_force_thresholds = {
     "LINK_HEAD_YAW": 600.0,
-    "LINK_TORSO_YAW": 800.0,
-    "LINK_ELBOW_END_L": 700.0,
-    "LINK_ELBOW_END_R": 700.0,
-    "LINK_SHOULDER_ROLL_L": 800.0,
-    "LINK_SHOULDER_ROLL_R": 800.0,
+    "LINK_TORSO_YAW": 1000.0,
+    "LINK_ELBOW_END_L": 1000.0,
+    "LINK_ELBOW_END_R": 1000.0,
   }
   forbidden_reward_force_thresholds = {
-    "LINK_HEAD_YAW": 200.0,
-    "LINK_TORSO_YAW": 500.0,
-    "LINK_ELBOW_END_L": 200.0,
-    "LINK_ELBOW_END_R": 200.0,
+    "LINK_HEAD_YAW": 600.0,
+    "LINK_TORSO_YAW": 800.0,
+    "LINK_ELBOW_END_L": 600.0,
+    "LINK_ELBOW_END_R": 600.0,
   }
   contact_reward_force_scales = {
     **forbidden_reward_force_thresholds,
-    "LINK_SHOULDER_ROLL_L": 500.0,
-    "LINK_SHOULDER_ROLL_R": 500.0,
   }
   cfg.terminations["forbidden_body_contact_force"].params["body_names"] = (
     forbidden_body_names
@@ -250,14 +246,7 @@ def pm1_flat_falling_env_cfg(
   # AMP: expert ``.npz`` only (do not mix with reset CSV pool above).
   if cfg.amp is not None:
     cfg.amp.motion_file = [
-      "motion_file/pm_fall4:v0/Back_3_converted.npz",
-      "motion_file/pm_fall4:v0/Front_1_converted_50fps.npz",
-      "motion_file/pm_fall4:v0/Left_1_converted_50fps.npz",
-      "motion_file/pm_fall4:v0/Right_1_converted_50fps.npz",
-      "motion_file/pm_fall4:v0/LeftFront_1_converted_50fps.npz",
-      "motion_file/pm_fall4:v0/LeftBack_3_converted.npz",
-      "motion_file/pm_fall4:v0/RightFront_1_converted_50fps.npz",
-      "motion_file/pm_fall4:v0/RightBack_3_converted.npz",
+      "motion_file/pm_fall4:v0/fallAndGetUp1_subject1_motion.npz",
     ]
   # PM1 IMU 传感器名与 G1 不同：imu_angular_velocity / imu_link_linear_velocity
   for group in ("policy", "critic"):
